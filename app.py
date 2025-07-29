@@ -23,8 +23,8 @@ from pdpbox import pdp
 import shap
 
 # Title and Subheader
-st.title("ML Interpreter")
-st.subheader("Blackbox ML classifiers visually explained")
+st.title("ML Interpreter") [cite: 16]
+st.subheader("Blackbox ML classifiers visually explained") [cite: 17]
 
 
 def upload_data(uploaded_file, dim_data):
@@ -41,7 +41,7 @@ def upload_data(uploaded_file, dim_data):
             "Then choose the target variable", col_arranged
         )
         X, y, features, target_labels = encode_data(df, target_col)
-    elif dim_data == "iris":
+    elif dim_data == "iris": [cite: 2]
         df = sns.load_dataset("iris")
         target_col = "species"
         X, y, features, target_labels = encode_data(df, target_col)
@@ -80,7 +80,7 @@ def splitdata(X, y):
 
 def make_pred(dim_model, X_test, clf):
     """get y_pred using the classifier"""
-    if dim_model == "XGBoost":
+    if dim_model == "XGBoost": [cite: 8]
         pred = clf.predict(DMatrix(X_test))
     elif dim_model == "lightGBM":
         pred = clf.predict(X_test)
@@ -116,21 +116,20 @@ def show_global_interpretation_shap(X_train, clf):
     explainer = shap.TreeExplainer(clf)
     shap_values = explainer.shap_values(X_train)
 
-    # It's good practice to create a figure explicitly for st.pyplot
-    fig, ax = plt.subplots(figsize=(12, 5)) # Create a figure and an axes object
+    # Create a Matplotlib figure explicitly for SHAP summary_plot
+    fig, ax = plt.subplots(figsize=(12, 5))
     shap.summary_plot(
         shap_values,
         X_train,
         plot_type="bar",
         max_display=5,
-        plot_size=(12, 5), # This might be redundant if fig is used directly
         color=plt.get_cmap("tab20b"),
-        show=False, # Set to False as we will pass the figure to st.pyplot
+        show=False, # Important: Set to False so shap doesn't try to show it globally
         color_bar=False,
-        # Pass the ax object to the shap plot if it supports it, or handle it via current figure context
-        # Some shap plots might not take an 'ax' argument directly in summary_plot
+        plot_component=0, # Added this to handle potential multi-output shap_values more gracefully for simple bar plots
+        ax=ax # Pass the axes object for plotting
     )
-    st.pyplot(fig) # Pass the figure to st.pyplot to avoid deprecation warning
+    st.pyplot(fig) # Pass the figure to st.pyplot to address deprecation warning
 
 
 def filter_misclassified(X_test, y_test, pred):
@@ -146,7 +145,7 @@ def show_local_interpretation_eli5(
     dataset, clf, pred, target_labels, features, dim_model, slider_idx
 ):
     """show the interpretation of individual decision points"""
-    info_local = st.button("How this works")
+    info_local = st.button("How this works") [cite: 48]
     if info_local:
         st.info(
             """
@@ -193,27 +192,25 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
     pred_i = int(pred[slider_idx])
 
     # Determine if it's a multi-class or binary classification for SHAP values
-    # Check if shap_values is a list (typical for multi-class) and if there are more than 2 target labels
     if isinstance(shap_values, list) and len(target_labels) > 2: # Multi-class
-        # explainer.expected_value will be an array
         expected_value_for_plot = explainer.expected_value[pred_i]
         shap_values_for_plot = shap_values[pred_i][slider_idx, :]
     else: # Binary classification or single output model
-        # explainer.expected_value might be a scalar or a single array
+        # For binary, expected_value might be a single float or array of two floats.
+        # If it's an array, we typically care about the positive class's expected value or the first one.
         expected_value_for_plot = explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
         shap_values_for_plot = shap_values[slider_idx, :]
 
-    # Removed matplotlib=True as it's not supported by shap.force_plot in some environments
-    # shap.force_plot will render as an HTML/JavaScript object in Streamlit
-    shap.force_plot(
-        expected_value_for_plot,
-        shap_values_for_plot,
-        X_test.iloc[slider_idx, :],
-        # matplotlib=True, # REMOVED THIS LINE
+    # Use st.write to render the SHAP force plot directly.
+    # The `matplotlib=True` argument is explicitly removed as it causes NotImplementedError on some deployments.
+    st.write(
+        shap.force_plot(
+            expected_value_for_plot,
+            shap_values_for_plot,
+            X_test.iloc[slider_idx, :],
+            # matplotlib=True, # REMOVED THIS LINE
+        )
     )
-    # st.pyplot() is not needed for force_plot when matplotlib=True is removed
-    # force_plot usually returns a JS object that Streamlit handles directly
-    st.write(shap.force_plot(expected_value_for_plot, shap_values_for_plot, X_test.iloc[slider_idx, :])) # Use st.write for direct SHAP HTML rendering
 
 
 def show_local_interpretation(
@@ -221,18 +218,18 @@ def show_local_interpretation(
 ):
     """show the interpretation based on the selected framework"""
     n_data = X_test.shape[0]
-    slider_idx = st.slider("Which datapoint to explain", 0, n_data - 1)
+    slider_idx = st.slider("Which datapoint to explain", 0, n_data - 1) [cite: 46]
 
     st.text(
         "Prediction: "
         + str(target_labels[int(pred[slider_idx])])
         + " | Actual label: "
         + str(target_labels[int(y_test[slider_idx])])
-    )
+    ) [cite: 47]
 
-    if dim_framework == "SHAP":
+    if dim_framework == "SHAP": [cite: 10]
         show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
-    elif dim_framework == "ELI5":
+    elif dim_framework == "ELI5": [cite: 11]
         show_local_interpretation_eli5(
             X_test, clf, pred, target_labels, features, dim_model, slider_idx
         )
@@ -241,10 +238,10 @@ def show_local_interpretation(
 def show_perf_metrics(y_test, pred):
     """show model performance metrics such as classification report or confusion matrix"""
     report = classification_report(y_test, pred, output_dict=True)
-    st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
+    st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose()) [cite: 14, 15]
     conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test)))
     sns.set(font_scale=1.4)
-    fig, ax = plt.subplots() # Create a figure explicitly
+    fig, ax = plt.subplots() # Create a figure explicitly for seaborn heatmap
     sns.heatmap(
         conf_matrix,
         square=True,
@@ -276,9 +273,14 @@ def draw_pdp(clf, dataset, features, target_labels, dim_model):
         else:
             ncol = 5
         
-        # Create a figure explicitly for pdp_plot
+        # Create a figure and axes explicitly for pdp_plot
         fig, axes = plt.subplots(ncols=ncol, figsize=(12, 5)) 
-        pdp.pdp_plot(pdp_dist, selected_col, plot_pts_vert=False, plot_ax=axes, show_titles=True) # plot_ax argument to use the created axes
+        # pdp_plot often takes `plot_ax` or relies on `plt.gca()`. For consistency, explicit axes are better.
+        # However, pdpbox's pdp_plot doesn't directly take an 'ax' argument in the same way.
+        # It typically draws on the current active figure/axes.
+        # To avoid global state issues and deprecation warnings, we ensure a figure is active.
+        # The library then draws on plt.gca() (the current axes of `fig`).
+        pdp.pdp_plot(pdp_dist, selected_col, plot_pts_vert=False, show_titles=True) # pdp.pdp_plot draws on the current active axes
         st.pyplot(fig) # Pass the figure to st.pyplot
 
 
@@ -288,8 +290,8 @@ def main():
     ################################################
     dim_data = st.sidebar.selectbox(
         "Try out sample data", ("iris", "titanic", "census income")
-    )
-    uploaded_file = st.sidebar.file_uploader("Or upload a CSV file", type="csv")
+    ) [cite: 1]
+    uploaded_file = st.sidebar.file_uploader("Or upload a CSV file", type="csv") [cite: 3, 4, 5, 6]
 
     df, X, y, features, target_labels = upload_data(uploaded_file, dim_data)
 
@@ -304,7 +306,7 @@ def main():
     ################################################
     dim_model = st.sidebar.selectbox(
         "Choose a model", ("XGBoost", "lightGBM", "randomforest")
-    )
+    ) [cite: 7]
     if dim_model == "randomforest":
         clf = RandomForestClassifier(n_estimators=500, random_state=0, n_jobs=-1)
         clf.fit(X_train, y_train)
@@ -333,24 +335,24 @@ def main():
 
     dim_framework = st.sidebar.radio(
         "Choose interpretation framework", ["SHAP", "ELI5"]
-    )
+    ) [cite: 9]
 
     ################################################
     # Model output
     ################################################
-    if st.sidebar.checkbox("Preview uploaded data"):
+    if st.sidebar.checkbox("Preview uploaded data"): [cite: 12]
         st.sidebar.dataframe(df.head())
 
     # the report is formatted to 2 decimal points (i.e. accuracy 1 means 1.00) dependent on streamlit styling update https://github.com/streamlit/streamlit/issues/1125
-    st.sidebar.markdown("#### Classification report")
+    st.sidebar.markdown("#### Classification report") [cite: 13]
     show_perf_metrics(y_test, pred)
 
     ################################################
     # Global Interpretation
     ################################################
-    st.markdown("#### Global Interpretation")
-    st.text("Most important features")
-    info_global = st.button("How it is calculated")
+    st.markdown("#### Global Interpretation") [cite: 26]
+    st.text("Most important features") [cite: 27]
+    info_global = st.button("How it is calculated") [cite: 28]
     if info_global:
         st.info(
             """
@@ -382,10 +384,10 @@ def main():
     ################################################
     # Local Interpretation
     ################################################
-    st.markdown("#### Local Interpretation")
+    st.markdown("#### Local Interpretation") [cite: 42]
 
     # misclassified
-    if st.checkbox("Filter for misclassified"):
+    if st.checkbox("Filter for misclassified"): [cite: 45]
         X_test, y_test, pred = filter_misclassified(X_test, y_test, pred)
         if X_test.shape[0] == 0:
             st.text("No misclassification🎉")
