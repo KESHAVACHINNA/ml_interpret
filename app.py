@@ -1,227 +1,175 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import shap
-import eli5
-from eli5.sklearn import PermutationImportance
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
-from sklearn.datasets import load_iris
 from sklearn.metrics import classification_report
 
-# Set Streamlit page configuration
+import shap
+import eli5
+from eli5.sklearn import PermutationImportance
+import matplotlib.pyplot as plt
+import io
+
+# Set page configuration
 st.set_page_config(layout="wide", page_title="ML Interpretability App")
 
 st.title("💡 ML Interpretability App")
-st.write("A Streamlit web app to visualize and understand how machine learning models make predictions using SHAP and ELI5.")
+st.markdown("A Streamlit web app to visualize and understand how machine learning models make predictions using SHAP and ELI5.")
 
-# --- Load and Prepare Data ---
+# Load the Iris dataset
 @st.cache_data
 def load_data():
-    """Loads the Iris dataset and returns it as a DataFrame."""
     iris = load_iris()
     df = pd.DataFrame(data=iris.data, columns=iris.feature_names)
     df['target'] = iris.target
     df['target_names'] = df['target'].map(lambda x: iris.target_names[x])
-    return df, iris.feature_names, iris.target_names, iris.target_names.tolist()
+    X = df.drop(['target', 'target_names'], axis=1)
+    y = df['target']
+    return X, y, iris.feature_names, iris.target_names, df
 
-df, feature_names, target_names_array, target_names_list = load_data()
+X, y, feature_names, target_names, df_full = load_data()
 
-# --- Sidebar for Model Selection and Training ---
-st.sidebar.header("⚙️ Model Configuration")
-
-model_choice = st.sidebar.selectbox(
+# Sidebar for model selection and data display
+st.sidebar.header("🧪 Model Configuration")
+model_name = st.sidebar.selectbox(
     "Select Classifier",
     ("Random Forest", "XGBoost", "LightGBM")
 )
 
-# Sliders for hyperparameters
-n_estimators = st.sidebar.slider("Number of Estimators", 50, 500, 100)
-max_depth = st.sidebar.slider("Max Depth", 2, 20, 10)
-learning_rate = st.sidebar.slider("Learning Rate (XGBoost/LightGBM only)", 0.01, 0.3, 0.1, 0.01)
-
 # Train the model
-X = df[feature_names]
-y = df['target']
+@st.cache_resource
+def train_model(model_name, X_train, y_train):
+    if model_name == "Random Forest":
+        model = RandomForestClassifier(random_state=42)
+    elif model_name == "XGBoost":
+        model = XGBClassifier(use_label_encoder=False, eval_metric='mlogloss', random_state=42)
+    elif model_name == "LightGBM":
+        model = LGBMClassifier(random_state=42)
+    model.fit(X_train, y_train)
+    return model
+
+# Split data
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-model = None
-if model_choice == "Random Forest":
-    model = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, random_state=42)
-elif model_choice == "XGBoost":
-    model = XGBClassifier(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate, use_label_encoder=False, eval_metric='mlogloss', random_state=42)
-elif model_choice == "LightGBM":
-    model = LGBMClassifier(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate, random_state=42)
+model = train_model(model_name, X_train, y_train)
 
-# Button to train the model
-if st.sidebar.button("Train Model"):
-    with st.spinner(f"Training {model_choice} model..."):
-        try:
-            model.fit(X_train, y_train)
-            st.session_state['model'] = model
-            st.session_state['X_test'] = X_test
-            st.session_state['y_test'] = y_test
-            st.session_state['model_trained'] = True # Flag to indicate model is trained
-            st.sidebar.success(f"{model_choice} Model Trained Successfully!")
-        except Exception as e:
-            st.sidebar.error(f"Error training model: {e}")
-            st.session_state['model_trained'] = False
-else:
-    # Initialize the flag if not present
-    if 'model_trained' not in st.session_state:
-        st.session_state['model_trained'] = False
-    if not st.session_state['model_trained']:
-        st.info("Train a model from the sidebar to see results.")
+st.header("📊 Model Performance & Data Overview")
 
-# --- Main Content Area ---
+col1, col2 = st.columns(2)
 
-if st.session_state.get('model_trained', False):
-    model = st.session_state['model']
-    X_test = st.session_state['X_test']
-    y_test = st.session_state['y_test']
+with col1:
+    st.subheader("Classification Report")
+    y_pred = model.predict(X_test)
+    report = classification_report(y_test, y_pred, target_names=target_names, output_dict=True)
+    report_df = pd.DataFrame(report).transpose()
+    st.dataframe(report_df.style.highlight_max(axis=0))
 
-    st.subheader("📊 Model Performance")
-    try:
-        y_pred = model.predict(X_test)
-        report = classification_report(y_test, y_pred, target_names=target_names_list, output_dict=True)
-        st.json(report)
-    except Exception as e:
-        st.error(f"Error generating classification report: {e}")
-
-    st.subheader("📋 Sample Data")
-    st.dataframe(X_test.head())
-
-    # --- SHAP Global Feature Importance ---
-    st.subheader("🔍 Global Feature Importance (SHAP Beeswarm Plot)")
-    st.write("The SHAP beeswarm plot shows the overall impact of each feature on the model's predictions.")
-    try:
-        explainer = shap.TreeExplainer(model)
-        # For multiclass, shap_values will be a list of arrays.
-        # We need to compute SHAP values for the entire X_test to get a good beeswarm plot.
-        shap_values = explainer.shap_values(X_test)
-
-        # Plotting the beeswarm for multiclass:
-        # shap.summary_plot can handle a list of shap_values for multiclass.
-        # It will either plot a combined view or allow selection of a class.
-        # By default, for multiclass, it often shows the overall importance.
-        # Using the base `shap.summary_plot` directly should work well.
-        
-        plt.figure(figsize=(10, 6))
-        # Ensure correct passing of feature names for multiclass
-        if isinstance(shap_values, list): # Multiclass output
-            # For multiclass, plotting the sum of absolute SHAP values across classes is a common way
-            # to get a single 'global importance' view.
-            # However, shap.summary_plot handles a list of arrays for different classes effectively.
-            shap.summary_plot(shap_values, X_test, feature_names=feature_names, plot_type="beeswarm", show=False)
-        else: # Binary or regression
-            shap.summary_plot(shap_values, X_test, feature_names=feature_names, plot_type="beeswarm", show=False)
-        
-        st.pyplot(plt.gcf(), bbox_inches='tight')
-        plt.clf() # Clear the plot to prevent overlapping issues in Streamlit
-    except Exception as e:
-        st.error(f"Error generating SHAP Beeswarm Plot: {e}")
-        st.warning("SHAP plots might require specific versions of libraries or might not work perfectly with all model types.")
-
-    # --- SHAP Local Prediction Explanation ---
-    st.subheader("🔬 Local Prediction Explanation (SHAP Force Plot)")
-    st.write("The SHAP force plot visualizes how features contribute to a single prediction.")
-    
-    if not X_test.empty:
-        instance_index = st.slider("Select an instance from the test set", 0, len(X_test) - 1, 0)
-        selected_instance = X_test.iloc[[instance_index]]
-        
-        try:
-            # Initialize JS for SHAP
-            shap.initjs()
-
-            # The TreeExplainer works well for tree-based models.
-            # For other models, you might need shap.KernelExplainer or shap.DeepExplainer.
-            explainer_local = shap.TreeExplainer(model)
-            
-            # Get SHAP values for the selected instance
-            shap_values_instance = explainer_local.shap_values(selected_instance)
-
-            # Get the base value (expected value)
-            expected_value = explainer_local.expected_value
-            
-            # Handle multiclass for force plot
-            if isinstance(shap_values_instance, list): # Multiclass
-                # For force plot, we typically show one class.
-                # Let's show the force plot for the predicted class.
-                predicted_class_index = model.predict(selected_instance)[0]
-                
-                # Ensure expected_value is also for the specific class
-                if isinstance(expected_value, np.ndarray):
-                    expected_value_for_plot = expected_value[predicted_class_index]
-                else:
-                    expected_value_for_plot = expected_value # If it's a single value already
-
-                force_plot_html = shap.force_plot(
-                    expected_value_for_plot,
-                    shap_values_instance[predicted_class_index], # SHAP values for the predicted class
-                    selected_instance,
-                    show=False,
-                    matplotlib=False # Crucial for getting HTML for Streamlit
-                )
-            else: # Binary or regression
-                force_plot_html = shap.force_plot(
-                    expected_value,
-                    shap_values_instance,
-                    selected_instance,
-                    show=False,
-                    matplotlib=False
-                )
-            
-            # Render the HTML component
-            st.components.v1.html(force_plot_html.html(), height=350)
-            
-        except Exception as e:
-            st.error(f"Error generating SHAP Force Plot: {e}")
-            st.warning("SHAP Force Plots can be sensitive to data types or explainer types. Ensure your SHAP library is updated.")
-    else:
-        st.warning("No test data available to generate a force plot.")
-
-
-    # --- ELI5 Permutation Importance ---
-    st.subheader("🧠 Feature Weights (ELI5 Permutation Importance)")
-    st.write("ELI5 permutation importance shows how much the model's performance decreases when a feature is randomly shuffled (permuted).")
-    
-    try:
-        # Initialize PermutationImportance
-        perm_importance = PermutationImportance(model, random_state=42)
-        
-        # Fit on the test data
-        perm_importance.fit(X_test, y_test)
-
-        # Generate the ELI5 HTML output
-        # For multiclass, eli5.show_weights might show weights for each class
-        # or an average. Passing target_names helps.
-        eli5_weights_html = eli5.format_as_html(
-            eli5.show_weights(
-                perm_importance,
-                feature_names=feature_names,
-                target_names=target_names_list # Use the list of target names
-            )
-        )
-        
-        # Display the HTML in Streamlit
-        st.components.v1.html(eli5_weights_html, height=500, scrolling=True)
-
-    except Exception as e:
-        st.error(f"Error generating ELI5 Permutation Importance: {e}")
-        st.warning("ELI5 might have issues with specific model types or if it can't determine feature importance.")
-
-else:
-    st.info("Train a model from the sidebar to visualize interpretability results.")
+with col2:
+    st.subheader("Sample Data")
+    st.dataframe(df_full.head())
+    st.write(f"Dataset Shape: {df_full.shape}")
 
 st.markdown("---")
-st.markdown("💡 Features:")
-st.markdown("- 🧪 Select and train classifiers (Random Forest, XGBoost, LightGBM) on the Iris dataset.")
-st.markdown("- 📊 View classification reports and sample data.")
-st.markdown("- 🔍 Visualize global feature importance using **SHAP beeswarm plots**.")
-st.markdown("- 🔬 Understand local predictions using **SHAP force plots**.")
-st.markdown("- 🧠 Analyze feature weights with **ELI5 permutation importance**.")
+
+st.header("🔍 Global Feature Importance (SHAP Beeswarm Plot)")
+st.write("The SHAP beeswarm plot shows how the top N features impact the model's output. Each point is a single prediction, and its horizontal location shows the impact of that feature on the prediction.")
+
+# SHAP Global plot
+try:
+    if model_name == "Random Forest":
+        explainer = shap.TreeExplainer(model)
+    elif model_name == "XGBoost":
+        explainer = shap.TreeExplainer(model)
+    elif model_name == "LightGBM":
+        explainer = shap.TreeExplainer(model)
+    else:
+        # For other models, use KernelExplainer (slower)
+        explainer = shap.KernelExplainer(model.predict_proba, X_train)
+
+    shap_values = explainer.shap_values(X_test)
+
+    # If shap_values is a list (for multi-output models like multi-class classification),
+    # take the average absolute SHAP values across classes for the beeswarm plot.
+    if isinstance(shap_values, list):
+        # For multi-class, shap_values is a list of arrays, one for each class
+        # We need to combine them for a global view. A common way is to take the mean absolute SHAP value across classes.
+        # Or, for a specific class, you can plot shap_values[class_index]
+        # For simplicity in beeswarm, let's just use the first class's SHAP values or sum them up.
+        # A better approach for multi-class beeswarm is to use `shap.summary_plot(shap_values, X_test)`
+        # which handles the multi-class case internally.
+        st.subheader(f"SHAP Beeswarm Plot (for all classes combined)")
+        fig_beeswarm, ax_beeswarm = plt.subplots(figsize=(10, 6))
+        shap.summary_plot(shap_values, X_test, plot_type="beeswarm", show=False)
+        st.pyplot(fig_beeswarm)
+    else:
+        st.subheader(f"SHAP Beeswarm Plot")
+        fig_beeswarm, ax_beeswarm = plt.subplots(figsize=(10, 6))
+        shap.summary_plot(shap_values, X_test, plot_type="beeswarm", show=False)
+        st.pyplot(fig_beeswarm)
+
+except Exception as e:
+    st.error(f"Error generating SHAP Beeswarm Plot: {e}")
+    st.info("SHAP plots can sometimes be resource-intensive. Please try refreshing or selecting a different model.")
+
+
+st.markdown("---")
+
+st.header("🔬 Local Prediction Explanation (SHAP Force Plot)")
+st.write("The SHAP force plot visualizes how features contribute to a single prediction, pushing the prediction higher (red) or lower (blue) than the base value.")
+
+# SHAP Local plot
+sample_index = st.slider("Select a sample from the test set to explain:", 0, len(X_test) - 1, 0)
+
+try:
+    # Get SHAP values for the selected instance
+    if isinstance(shap_values, list):
+        # For multi-class, you need to specify the class for the force plot
+        # Let's assume we are explaining the prediction for the predicted class
+        predicted_class_index = model.predict(X_test.iloc[[sample_index]])[0]
+        shap_values_instance = shap_values[predicted_class_index][sample_index]
+        expected_value_instance = explainer.expected_value[predicted_class_index]
+    else:
+        shap_values_instance = shap_values[sample_index]
+        expected_value_instance = explainer.expected_value
+
+    st.write(f"Explaining prediction for sample index: **{sample_index}**")
+    st.write(f"Actual class: **{target_names[y_test.iloc[sample_index]]}**")
+    st.write(f"Predicted class: **{target_names[model.predict(X_test.iloc[[sample_index]])[0]]}**")
+
+    # Render force plot
+    # Using st.components.v1.html to embed the JS visualization
+    shap.initjs()
+    force_plot_html = shap.force_plot(
+        expected_value_instance,
+        shap_values_instance,
+        X_test.iloc[sample_index],
+        feature_names=feature_names,
+        matplotlib=False # Set to False to get HTML for Streamlit
+    )
+    st.components.v1.html(force_plot_html.html(), height=300)
+
+except Exception as e:
+    st.error(f"Error generating SHAP Force Plot: {e}")
+    st.info("Please ensure a model is trained and a valid sample index is selected.")
+
+st.markdown("---")
+
+st.header("🧠 Feature Weights (ELI5 Permutation Importance)")
+st.write("ELI5 Permutation Importance measures how much the model's prediction error increases when a feature's values are randomly shuffled. This indicates the feature's importance.")
+
+try:
+    perm = PermutationImportance(model, random_state=42).fit(X_test, y_test)
+    # Convert ELI5 HTML to Streamlit compatible display
+    eli5_html = eli5.show_weights(perm, feature_names=feature_names, target_names=target_names)._repr_html_()
+    st.components.v1.html(eli5_html, height=500, scrolling=True)
+
+except Exception as e:
+    st.error(f"Error generating ELI5 Permutation Importance: {e}")
+    st.info("Permutation Importance requires a fitted model and test data.")
+
+st.markdown("---")
+st.info("This app demonstrates basic ML interpretability. For production use, consider more robust error handling and performance optimizations.")
