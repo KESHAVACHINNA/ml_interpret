@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+
+# ml
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import LabelEncoder
@@ -8,483 +10,409 @@ from sklearn.metrics import classification_report, confusion_matrix
 import lightgbm as lgb
 import xgboost as xgb
 from xgboost import DMatrix
+
+# plotting
 import matplotlib.pyplot as plt
 import seaborn as sns
 import altair as alt
+
+# interpretation
 import eli5
 from eli5.sklearn import PermutationImportance
-from pdpbox import pdp, get_dataset
+from pdpbox import pdp
 import shap
-from io import StringIO
 
 # Title and Subheader
-st.set_page_config(page_title="ML Interpreter", layout="wide")
 st.title("ML Interpreter")
 st.subheader("Blackbox ML classifiers visually explained")
 
-def clean_column_names(columns):
-    """Clean column names to be alphanumeric only"""
-    return ["".join(c if c.isalnum() else "_" for c in str(x)) for x in columns]
 
 def upload_data(uploaded_file, dim_data):
     if uploaded_file is not None:
-        try:
-            df = pd.read_csv(uploaded_file)
-            df.columns = clean_column_names(df.columns)
-            st.sidebar.success("File uploaded successfully!")
-        except Exception as e:
-            st.error(f"Error reading file: {str(e)}")
-            return None, None, None, None, None
-            
-        col_arranged = df.columns.tolist()
-        target_col = st.sidebar.selectbox("Choose the target variable", col_arranged)
+        st.sidebar.success("File uploaded!")
+        df = pd.read_csv(uploaded_file, encoding="utf8")
+        # replace all non alphanumeric column names to avoid lgbm issue
+        df.columns = [
+            "".join(c if c.isalnum() else "_" for c in str(x)) for x in df.columns
+        ]
+        # make the last col the default outcome
+        col_arranged = df.columns[:-1].insert(0, df.columns[-1])
+        target_col = st.sidebar.selectbox(
+            "Then choose the target variable", col_arranged
+        )
         X, y, features, target_labels = encode_data(df, target_col)
-        
     elif dim_data == "iris":
         df = sns.load_dataset("iris")
         target_col = "species"
         X, y, features, target_labels = encode_data(df, target_col)
-        
     elif dim_data == "titanic":
         df = sns.load_dataset("titanic").drop(
             columns=["class", "who", "adult_male", "deck", "alive", "alone"]
         )
         target_col = "survived"
         X, y, features, target_labels = encode_data(df, target_col)
-        
     elif dim_data == "census income":
         X, y = shap.datasets.adult()
-        X.columns = clean_column_names(X.columns)
         features = X.columns
-        target_labels = np.array(['<=50K', '>50K'])
-        df = pd.concat([X, pd.Series(y, name='Outcome')], axis=1)
-        target_col = 'Outcome'
-        le = LabelEncoder()
-        y = le.fit_transform(y)
-        
+        target_labels = pd.Series(y).unique()
+        df = pd.concat([X, pd.DataFrame(y, columns=["Outcome"])], axis=1)
     return df, X, y, features, target_labels
+
 
 def encode_data(data, targetcol):
     """preprocess categorical value"""
     X = pd.get_dummies(data.drop(targetcol, axis=1)).fillna(0)
-    X.columns = clean_column_names(X.columns)
+    X.columns = ["".join(c if c.isalnum() else "_" for c in str(x)) for x in X.columns]
     features = X.columns
-    
-    le = LabelEncoder()
-    y = le.fit_transform(data[targetcol])
-    target_labels = le.classes_
-    
+    data[targetcol] = data[targetcol].astype("object")
+    target_labels = pd.Series(data[targetcol]).unique() # Ensure target_labels is a list/array for consistent use
+    y = pd.factorize(data[targetcol])[0]
     return X, y, features, target_labels
 
+
 def splitdata(X, y):
-    """split dataset into training & testing"""
+    """split dataset into trianing & testing"""
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, train_size=0.80, random_state=42, stratify=y
+        X, y, train_size=0.80, random_state=0
     )
     return X_train, X_test, y_train, y_test
 
-def make_pred(dim_model, X_test, clf, target_labels):
+
+def make_pred(dim_model, X_test, clf):
     """get y_pred using the classifier"""
     if dim_model == "XGBoost":
-        dtest = DMatrix(X_test)
-        pred_proba = clf.predict(dtest)
-        if len(target_labels) > 2:  # Multiclass
-            pred = np.argmax(pred_proba, axis=1)
-        else:  # Binary classification
-            pred = (pred_proba > 0.5).astype(int)
+        pred = clf.predict(DMatrix(X_test))
     elif dim_model == "lightGBM":
         pred = clf.predict(X_test)
-    else:  # RandomForest
+    else:
         pred = clf.predict(X_test)
     return pred
+
 
 def show_global_interpretation_eli5(X_train, y_train, features, clf, dim_model):
     """show most important features via permutation importance in ELI5"""
     if dim_model == "XGBoost":
         df_global_explain = eli5.explain_weights_df(
-            clf, feature_names=features.tolist(), top=10
+            clf, feature_names=features.tolist(), top=5 # Ensure feature_names is a list
         ).round(2)
     else:
-        perm = PermutationImportance(clf, n_iter=5, random_state=1).fit(X_train, y_train)
+        perm = PermutationImportance(clf, n_iter=2, random_state=1).fit(
+            X_train, y_train
+        )
         df_global_explain = eli5.explain_weights_df(
-            perm, feature_names=features.tolist(), top=10
+            perm, feature_names=features.tolist(), top=5 # Ensure feature_names is a list
         ).round(2)
-    
-    if not df_global_explain.empty:
-        bar = (
-            alt.Chart(df_global_explain)
-            .mark_bar(color='steelblue', opacity=0.7)
-            .encode(
-                x='weight:Q',
-                y=alt.Y('feature:N', sort='-x'),
-                tooltip=['feature', 'weight']
-            )
-            .properties(height=400, title='Top 10 Feature Importances')
-        )
-        st.altair_chart(bar, use_container_width=True)
-    else:
-        st.warning("No feature importance data available")
+    bar = (
+        alt.Chart(df_global_explain)
+        .mark_bar(color="red", opacity=0.6, size=16)
+        .encode(x="weight", y=alt.Y("feature", sort="-x"), tooltip=["weight"])
+        .properties(height=160)
+    )
+    st.write(bar)
 
-def show_global_interpretation_shap(clf, X_train, model_type):
-    """show most important features via SHAP"""
-    try:
-        st.set_option('deprecation.showPyplotGlobalUse', False)
-        
-        if model_type == "XGBoost":
-            explainer = shap.TreeExplainer(clf)
-            shap_values = explainer.shap_values(DMatrix(X_train))
-        else:
-            explainer = shap.TreeExplainer(clf)
-            shap_values = explainer.shap_values(X_train)
-            
-        plt.figure(figsize=(10, 6))
-        shap.summary_plot(
-            shap_values, 
-            X_train,
-            plot_type="bar",
-            max_display=10,
-            show=False
-        )
-        st.pyplot(bbox_inches='tight')
-        plt.clf()
-    except Exception as e:
-        st.error(f"SHAP error: {str(e)}")
+
+def show_global_interpretation_shap(X_train, clf):
+    """show most important features via permutation importance in SHAP"""
+    explainer = shap.TreeExplainer(clf)
+    shap_values = explainer.shap_values(X_train)
+
+    # Create a figure and axes for matplotlib plot
+    fig, ax = plt.subplots(figsize=(12, 5))
+    shap.summary_plot(
+        shap_values,
+        X_train,
+        plot_type="bar",
+        max_display=5,
+        color=plt.get_cmap("tab20b"),
+        show=False, # Do not show directly, let Streamlit handle it
+        color_bar=False,
+        plot_component=0,
+        ax=ax # Pass the axes object
+    )
+    st.pyplot(fig) # Pass the figure object to st.pyplot()
+
 
 def filter_misclassified(X_test, y_test, pred):
     """get misclassified instances"""
     idx_misclassified = pred != y_test
-    return X_test[idx_misclassified], y_test[idx_misclassified], pred[idx_misclassified]
+    X_test_misclassified = X_test[idx_misclassified]
+    y_test_misclassified = y_test[idx_misclassified]
+    pred_misclassified = pred[idx_misclassified]
+    return X_test_misclassified, y_test_misclassified, pred_misclassified
+
 
 def show_local_interpretation_eli5(
-    X_test, clf, target_labels, features, dim_model, instance_idx
+    dataset, clf, pred, target_labels, features, dim_model, slider_idx
 ):
     """show the interpretation of individual decision points"""
-    with st.expander("ℹ️ How to interpret this"):
-        st.info("""
-        **Understanding the Explanation**  
-        - **Contribution**: How much each feature affected the prediction  
-        - **Value**: The actual feature value in this instance  
-        - **Bias**: The model's baseline prediction  
-        
-        **Colors**:  
-        - Green: Features pushing prediction higher  
-        - Red: Features pushing prediction lower  
-        """)
-    
-    try:
-        if dim_model == "XGBoost":
-            html_str = eli5.show_prediction(
-                clf, 
-                X_test.iloc[instance_idx], 
-                feature_names=features.tolist(),
-                show_feature_values=True,
-                top=15
-            )
-        else:
-            html_str = eli5.show_prediction(
-                clf,
-                X_test.iloc[instance_idx],
-                feature_names=features.tolist(),
-                target_names=target_labels.tolist(),
-                show_feature_values=True,
-                top=15
-            )
-        st.components.v1.html(html_str.data, height=500, scrolling=True)
-    except Exception as e:
-        st.error(f"ELI5 error: {str(e)}")
+    info_local = st.button("How this works")
+    if info_local:
+        st.info(
+            """
+        **What's included** Input data is split 80/20 into training and testing. 
+        Each of the individual testing datapoint can be inspected by index.
+        **To Read the table** The table describes how an individual datapoint is classified.
+        Contribution refers to the extent & direction of influence a feature has on the outcome
+        Value refers to the value of the feature in the dataset. Bias means an intercept.
+        """
+        )
 
-def show_local_interpretation_shap(clf, X_test, model_type, instance_idx, target_labels):
+    if dim_model == "XGBoost":
+        local_interpretation = eli5.show_prediction(
+            clf, doc=dataset.iloc[slider_idx, :], show_feature_values=True, top=5
+        )
+    else:
+        local_interpretation = eli5.show_prediction(
+            clf,
+            doc=dataset.iloc[slider_idx, :],
+            target_names=target_labels.tolist(), # Ensure target names are a list
+            show_feature_values=True,
+            top=5,
+            targets=[True],
+        )
+    st.markdown(
+        local_interpretation.data.replace("\n", ""), unsafe_allow_html=True,
+    )
+
+
+def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx):
     """show the interpretation of individual decision points"""
-    with st.expander("ℹ️ How to interpret this force plot"):
-        st.info("""
-        **Force Plot Guide**  
-        - Base value: Model's average prediction  
-        - Output value: Prediction for this instance  
-        - Red arrows: Increase prediction  
-        - Blue arrows: Decrease prediction  
-        - Length: Strength of feature's effect  
-        """)
-    
-    try:
-        if model_type == "XGBoost":
-            explainer = shap.TreeExplainer(clf)
-            shap_values = explainer.shap_values(DMatrix(X_test))
-            instance = X_test.iloc[instance_idx:instance_idx+1]
-            
-            if len(target_labels) > 2:
-                pred_class = clf.predict(DMatrix(instance))[0]
-                class_idx = int(np.argmax(pred_class))
-                shap.initjs()
-                plt.figure()
-                shap.force_plot(
-                    explainer.expected_value[class_idx],
-                    shap_values[class_idx][instance_idx],
-                    instance,
-                    feature_names=X_test.columns.tolist(),
-                    matplotlib=True,
-                    show=False
-                )
-            else:
-                shap.initjs()
-                plt.figure()
-                shap.force_plot(
-                    explainer.expected_value,
-                    shap_values[instance_idx],
-                    instance,
-                    feature_names=X_test.columns.tolist(),
-                    matplotlib=True,
-                    show=False
-                )
-                
-        else:  # lightGBM or RandomForest
-            explainer = shap.TreeExplainer(clf)
-            shap_values = explainer.shap_values(X_test)
-            instance = X_test.iloc[instance_idx:instance_idx+1]
-            
-            if len(target_labels) > 2:
-                pred_class = clf.predict(instance)[0]
-                class_idx = int(pred_class)
-                shap.initjs()
-                plt.figure()
-                shap.force_plot(
-                    explainer.expected_value[class_idx],
-                    shap_values[class_idx][instance_idx],
-                    instance,
-                    feature_names=X_test.columns.tolist(),
-                    matplotlib=True,
-                    show=False
-                )
-            else:
-                shap.initjs()
-                plt.figure()
-                shap.force_plot(
-                    explainer.expected_value,
-                    shap_values[instance_idx],
-                    instance,
-                    feature_names=X_test.columns.tolist(),
-                    matplotlib=True,
-                    show=False
-                )
-        
-        st.pyplot(bbox_inches='tight')
-        plt.clf()
-    except Exception as e:
-        st.error(f"SHAP error: {str(e)}")
-        st.error("This might occur with certain model types or data formats.")
+    info_local = st.button("How this works")
+    if info_local:
+        st.info(
+            """
+        This chart illustrates how each feature collectively influence the prediction outcome.
+        Features in the red make it more likely to be the predicted class, and the features in blue pushing back leftward reduce the likelihood. [Read more about forceplot](https://github.com/slundberg/shap) 
+        Please note that the explanation here is always based on the predicted class rather than the positive class (i.e. if predicted class is 0, to the right means more likely to be 0) to cater for multi-class senaiors.
+        """
+        )
+    explainer = shap.TreeExplainer(clf)
+    shap_values = explainer.shap_values(X_test)
 
-def show_perf_metrics(y_test, pred, target_labels):
-    """show model performance metrics"""
-    st.sidebar.subheader("📊 Classification Report")
-    report = classification_report(y_test, pred, target_names=target_labels, output_dict=True)
-    st.sidebar.dataframe(pd.DataFrame(report).transpose().style.background_gradient(cmap='Blues'))
+    # the predicted class for the selected instance
+    pred_i = int(pred[slider_idx])
+
+    # Handle multi-class expected_value if it's a list
+    if isinstance(explainer.expected_value, list) and len(target_labels) > 2:
+        expected_value_for_plot = explainer.expected_value[pred_i]
+        shap_values_for_plot = shap_values[pred_i][slider_idx, :]
+    else: # Binary classification or single output model
+        expected_value_for_plot = explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
+        shap_values_for_plot = shap_values[slider_idx, :]
+
+
+    # Pass feature_values_for_plot as a Pandas Series (1D)
+    feature_values_for_plot = X_test.iloc[slider_idx, :]
+    feature_names_for_plot = X_test.columns.tolist()
+
+    # Call force_plot and capture the figure object
+    fig = shap.force_plot(
+        expected_value_for_plot,
+        shap_values_for_plot,
+        feature_values_for_plot, # Now a 1D Pandas Series
+        feature_names=feature_names_for_plot, # Explicitly pass feature names
+        matplotlib=True, # Keep matplotlib=True
+    )
+    # Pass the figure object to st.pyplot()
+    st.pyplot(fig)
+
+
+def show_local_interpretation(
+    X_test, y_test, clf, pred, target_labels, features, dim_model, dim_framework
+):
+    """show the interpretation based on the selected framework"""
+    n_data = X_test.shape[0]
+    slider_idx = st.slider("Which datapoint to explain", 0, n_data - 1)
+
+    st.text(
+        "Prediction: "
+        + str(target_labels[int(pred[slider_idx])])
+        + " | Actual label: "
+        + str(target_labels[int(y_test[slider_idx])])
+    )
+
+    if dim_framework == "SHAP":
+        # Pass target_labels to show_local_interpretation_shap
+        show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
+    elif dim_framework == "ELI5":
+        show_local_interpretation_eli5(
+            X_test, clf, pred, target_labels, features, dim_model, slider_idx
+        )
+
+
+def show_perf_metrics(y_test, pred):
+    """show model performance metrics such as classification report or confusion matrix"""
+    report = classification_report(y_test, pred, output_dict=True)
+    st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
     
-    st.sidebar.subheader("📈 Confusion Matrix")
-    conf_matrix = confusion_matrix(y_test, pred)
-    fig, ax = plt.subplots(figsize=(8, 6))
+    # Create a figure and axes for matplotlib plot
+    fig, ax = plt.subplots()
+    conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test))) # Use labels for consistency
+    sns.set(font_scale=1.4)
     sns.heatmap(
         conf_matrix,
+        square=True,
         annot=True,
-        fmt='d',
-        cmap='Blues',
-        xticklabels=target_labels,
-        yticklabels=target_labels,
-        ax=ax
+        annot_kws={"size": 15},
+        cmap="YlGnBu",
+        cbar=False,
+        ax=ax # Pass the axes object
     )
-    ax.set_xlabel('Predicted')
-    ax.set_ylabel('Actual')
-    ax.set_title('Confusion Matrix')
-    st.sidebar.pyplot(fig)
-    plt.clf()
+    st.sidebar.pyplot(fig) # Pass the figure object to st.sidebar.pyplot()
 
-def draw_pdp(clf, X_train, features, target_labels, dim_model):
-    """draw PDP plot"""
-    if dim_model == "XGBoost":
-        st.warning("PDP plots not currently supported for XGBoost in this app")
-        return
-        
-    selected_col = st.selectbox("Select a feature for analysis", features)
-    
-    with st.expander("ℹ️ About Partial Dependence Plots"):
-        st.info("""
-        **What This Shows**  
-        - How a feature affects predictions across its value range  
-        - Marginal relationship between feature and outcome  
-        
-        **Interpretation**  
-        - Upward slope: Higher values increase prediction probability  
-        - Downward slope: Lower values increase probability  
-        - Flat line: Little predictive relationship  
-        """)
-    
-    try:
-        pdp_iso = pdp.pdp_isolate(
-            model=clf, 
-            dataset=X_train, 
-            model_features=features, 
-            feature=selected_col
+
+def draw_pdp(clf, dataset, features, target_labels, dim_model):
+    """draw pdpplot given a model, data, all the features and the selected feature to plot"""
+
+    if dim_model != "XGBoost":
+        selected_col = st.selectbox("Select a feature", features)
+        st.info(
+            """**To read the chart:** The curves describe how a feature marginally varies with the likelihood of outcome. Each subplot belong to a class outcome.
+        When a curve is below 0, the data is unlikely to belong to that class.
+        [Read more] ("https://christophm.github.io/interpretable-ml-book/pdp.html") """
         )
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        pdp.pdp_plot(
-            pdp_iso, 
-            selected_col, 
-            center=True,
-            plot_lines=True,
-            frac_to_plot=100,
-            x_quantile=True,
-            show_percentile=True,
-            ax=ax
+
+        pdp_dist = pdp.pdp_isolate(
+            model=clf, dataset=dataset, model_features=features, feature=selected_col
         )
-        ax.set_title(f'Partial Dependence Plot for {selected_col}')
-        st.pyplot(fig)
-        plt.clf()
-    except Exception as e:
-        st.error(f"PDP Error: {str(e)}")
+        if len(target_labels) <= 5:
+            ncol = len(target_labels)
+        else:
+            ncol = 5
+        
+        # Create a figure and axes for matplotlib plot
+        fig, axes = plt.subplots(ncols=ncol, figsize=(12, 5))
+        pdp.pdp_plot(pdp_dist, selected_col, plot_pts_vert=False, show_titles=True, ax=axes) # Pass axes
+        st.pyplot(fig) # Pass the figure object to st.pyplot()
+
 
 def main():
-    # Initialize session state
-    if 'data_loaded' not in st.session_state:
-        st.session_state.data_loaded = False
-    
     ################################################
-    # Sidebar Configuration
+    # upload file
     ################################################
-    st.sidebar.header("⚙️ Configuration")
-    
-    # Data selection
     dim_data = st.sidebar.selectbox(
-        "Choose sample data", 
-        ("iris", "titanic", "census income"),
-        index=0
+        "Try out sample data", ("iris", "titanic", "census income")
     )
-    uploaded_file = st.sidebar.file_uploader("Or upload your CSV", type="csv")
-    
-    # Model selection
+    uploaded_file = st.sidebar.file_uploader("Or upload a CSV file", type="csv")
+
+    df, X, y, features, target_labels = upload_data(uploaded_file, dim_data)
+
+    ################################################
+    # process data
+    ################################################
+
+    X_train, X_test, y_train, y_test = splitdata(X, y)
+
+    ################################################
+    # apply model
+    ################################################
     dim_model = st.sidebar.selectbox(
-        "Select model", 
-        ("randomforest", "lightGBM", "XGBoost"),
-        index=0
+        "Choose a model", ("XGBoost", "lightGBM", "randomforest")
     )
-    
-    # Interpretation framework
-    dim_framework = st.sidebar.radio(
-        "Interpretation method", 
-        ["SHAP", "ELI5"],
-        index=0
-    )
-    
-    ################################################
-    # Data Loading and Processing
-    ################################################
-    if uploaded_file or dim_data:
-        with st.spinner("Loading and processing data..."):
-            df, X, y, features, target_labels = upload_data(uploaded_file, dim_data)
-            
-            if df is not None:
-                st.session_state.data_loaded = True
-                X_train, X_test, y_train, y_test = splitdata(X, y)
-                
-                # Model training
-                with st.spinner(f"Training {dim_model} model..."):
-                    if dim_model == "randomforest":
-                        clf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
-                        clf.fit(X_train, y_train)
-                    elif dim_model == "lightGBM":
-                        if len(target_labels) > 2:
-                            clf = lgb.LGBMClassifier(objective="multiclass", n_jobs=-1, random_state=42)
-                        else:
-                            clf = lgb.LGBMClassifier(objective="binary", n_jobs=-1, random_state=42)
-                        clf.fit(X_train, y_train)
-                    elif dim_model == "XGBoost":
-                        params = {
-                            "objective": "multi:softprob" if len(target_labels) > 2 else "binary:logistic",
-                            "max_depth": 4,
-                            "random_state": 42,
-                            "num_class": len(target_labels) if len(target_labels) > 2 else 1
-                        }
-                        dmatrix = DMatrix(data=X_train, label=y_train)
-                        clf = xgb.train(params=params, dtrain=dmatrix, num_boost_round=100)
-                
-                # Make predictions
-                pred = make_pred(dim_model, X_test, clf, target_labels)
-                
-                # Show performance metrics
-                show_perf_metrics(y_test, pred, target_labels)
-    
-    if not st.session_state.get('data_loaded', False):
-        st.info("👈 Please select sample data or upload a CSV file to begin")
-        return
-    
-    ################################################
-    # Main Content
-    ################################################
-    tab1, tab2, tab3 = st.tabs(["Global Analysis", "Local Analysis", "Feature Analysis"])
-    
-    with tab1:
-        st.header("🌍 Global Model Interpretation")
-        st.write("Understand what features drive your model's predictions overall")
-        
-        if dim_framework == "SHAP":
-            show_global_interpretation_shap(clf, X_train, dim_model)
-        else:
-            show_global_interpretation_eli5(X_train, y_train, features, clf, dim_model)
-    
-    with tab2:
-        st.header("🔍 Local Prediction Explanation")
-        st.write("Explore how individual predictions are made")
-        
-        # Misclassification filter
-        misclassified_only = st.checkbox("Show only misclassified instances", value=False)
-        if misclassified_only:
-            X_test_disp, y_test_disp, pred_disp = filter_misclassified(X_test, y_test, pred)
-            if X_test_disp.shape[0] == 0:
-                st.success("🎉 No misclassifications found!")
-                st.stop()
-        else:
-            X_test_disp, y_test_disp, pred_disp = X_test, y_test, pred
-        
-        n_data = X_test_disp.shape[0]
-        instance_idx = st.slider(
-            "Select instance to explain", 
-            0, 
-            n_data - 1, 
-            0,
-            key='instance_slider'
-        )
-        
-        # Prediction details
-        actual = target_labels[y_test_disp.iloc[instance_idx]]
-        predicted = target_labels[pred_disp[instance_idx]]
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Actual", actual)
-        with col2:
-            st.metric("Predicted", predicted, delta="Correct" if actual == predicted else "Incorrect", 
-                     delta_color="normal" if actual == predicted else "inverse")
-        
-        if dim_framework == "SHAP":
-            show_local_interpretation_shap(clf, X_test_disp, dim_model, instance_idx, target_labels)
-        else:
-            show_local_interpretation_eli5(
-                X_test_disp, clf, target_labels, features, dim_model, instance_idx
+    if dim_model == "randomforest":
+        clf = RandomForestClassifier(n_estimators=500, random_state=0, n_jobs=-1)
+        clf.fit(X_train, y_train)
+    elif dim_model == "lightGBM":
+        if len(target_labels) > 2:
+            clf = lgb.LGBMClassifier(
+                class_weight="balanced", objective="multiclass", n_jobs=-1, verbose=-1
             )
-    
-    with tab3:
-        st.header("📊 Feature Behavior Analysis")
-        st.write("Understand how individual features affect predictions")
+        else:
+            clf = lgb.LGBMClassifier(objective="binary", n_jobs=-1, verbose=-1)
+        clf.fit(X_train, y_train)
+    elif dim_model == "XGBoost":
+        params = {
+            "max_depth": 5,
+            "silent": 1,
+            "random_state": 2,
+            "num_class": len(target_labels),
+        }
+        dmatrix = DMatrix(data=X_train, label=y_train)
+        clf = xgb.train(params=params, dtrain=dmatrix)
+
+    ################################################
+    # Predict
+    ################################################
+    pred = make_pred(dim_model, X_test, clf)
+
+    dim_framework = st.sidebar.radio(
+        "Choose interpretation framework", ["SHAP", "ELI5"]
+    )
+
+    ################################################
+    # Model output
+    ################################################
+    if st.sidebar.checkbox("Preview uploaded data"):
+        st.sidebar.dataframe(df.head())
+
+    st.sidebar.markdown("#### Classification report")
+    show_perf_metrics(y_test, pred)
+
+    ################################################
+    # Global Interpretation
+    ################################################
+    st.markdown("#### Global Interpretation")
+    st.text("Most important features")
+    info_global = st.button("How it is calculated")
+    if info_global:
+        st.info(
+            """
+        The importance of each feature is derived from [permutation importance](https://www.kaggle.com/dansbecker/permutation-importance) -
+        by randomly shuffle a feature, how much does the model performance decrease.
+        """
+        )
+    if dim_framework == "SHAP":
+        show_global_interpretation_shap(X_train, clf)
+    elif dim_framework == "ELI5":
+        show_global_interpretation_eli5(X_train, y_train, features, clf, dim_model)
+
+    if st.sidebar.button("About the app"):
+        st.sidebar.markdown(
+            """
+            Read more about how it works on [Github] (https://github.com/yanhann10/ml_interpret)
+            Basic data cleaning recommended before upload 
+            [Feedback](https://docs.google.com/forms/d/e/1FAIpQLSdTXKpMPC0-TmWf2ngU9A0sokH5Z0m-QazSPBIZyZ2AbXIBug/viewform?usp=sf_link) 
+            Last update Mar 2020 by [@hannahyan](https://twitter.com/hannahyan)
+            """
+        )
+        st.sidebar.markdown(
+            '<a href="https://ctt.ac/zu8S4"><img src="https://image.flaticon.com/icons/svg/733/733579.svg" width=16></a>',
+            unsafe_allow_html=True,
+        )
+
+    ################################################
+    # Local Interpretation
+    ################################################
+    st.markdown("#### Local Interpretation")
+
+    # misclassified
+    if st.checkbox("Filter for misclassified"):
+        X_test, y_test, pred = filter_misclassified(X_test, y_test, pred)
+        if X_test.shape[0] == 0:
+            st.text("No misclassification🎉")
+        else:
+            st.text(str(X_test.shape[0]) + " misclassified total")
+            show_local_interpretation(
+                X_test,
+                y_test,
+                clf,
+                pred,
+                target_labels,
+                features,
+                dim_model,
+                dim_framework,
+            )
+    else:
+        show_local_interpretation(
+            X_test, y_test, clf, pred, target_labels, features, dim_model, dim_framework
+        )
+
+    ################################################
+    # PDP plot
+    ################################################
+    if dim_model != "XGBoost" and st.checkbox("Show how features vary with outcome"):
         draw_pdp(clf, X_train, features, target_labels, dim_model)
-    
-    ################################################
-    # Footer
-    ################################################
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("""
-    **About this app**  
-    [GitHub Repository](https://github.com/yourusername/ml-interpreter)  
-    Built with Streamlit · SHAP · ELI5  
-    For educational and demonstration purposes  
-    """)
+
 
 if __name__ == "__main__":
     main()
