@@ -145,11 +145,9 @@ def show_local_interpretation_eli5(
     if info_local:
         st.info(
             """
-        **What's included**  
-        Input data is split 80/20 into training and testing. 
+        **What's included** Input data is split 80/20 into training and testing. 
         Each of the individual testing datapoint can be inspected by index.
-        **To Read the table**  
-        The table describes how an individual datapoint is classified.
+        **To Read the table** The table describes how an individual datapoint is classified.
         Contribution refers to the extent & direction of influence a feature has on the outcome
         Value refers to the value of the feature in the dataset. Bias means an intercept.
         """
@@ -224,8 +222,8 @@ def show_perf_metrics(y_test, pred):
     """show model performance metrics such as classification report or confusion matrix"""
     report = classification_report(y_test, pred, output_dict=True)
     st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
-conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test)))
-sns.set(font_scale=1.4)
+    conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test)))
+    sns.set(font_scale=1.4)
     sns.heatmap(
         conf_matrix,
         square=True,
@@ -345,11 +343,11 @@ def main():
     if st.sidebar.button("About the app"):
         st.sidebar.markdown(
             """
-             Read more about how it works on [Github] (https://github.com/yanhann10/ml_interpret)
-             Basic data cleaning recommended before upload   
-             [Feedback](https://docs.google.com/forms/d/e/1FAIpQLSdTXKpMPC0-TmWf2ngU9A0sokH5Z0m-QazSPBIZyZ2AbXIBug/viewform?usp=sf_link)   
-             Last update Mar 2020 by [@hannahyan](https://twitter.com/hannahyan)
-              """
+            Read more about how it works on [Github] (https://github.com/yanhann10/ml_interpret)
+            Basic data cleaning recommended before upload   
+            [Feedback](https://docs.google.com/forms/d/e/1FAIpQLSdTXKpMPC0-TmWf2ngU9A0sokH5Z0m-QazSPBIZyZ2AbXIBug/viewform?usp=sf_link)   
+            Last update Mar 2020 by [@hannahyan](https://twitter.com/hannahyan)
+            """
         )
         st.sidebar.markdown(
             '<a href="https://ctt.ac/zu8S4"><img src="https://image.flaticon.com/icons/svg/733/733579.svg" width=16></a>',
