@@ -225,7 +225,7 @@ def show_perf_metrics(y_test, pred):
     report = classification_report(y_test, pred, output_dict=True)
     st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
 conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test)))
-    sns.set(font_scale=1.4)
+sns.set(font_scale=1.4)
     sns.heatmap(
         conf_matrix,
         square=True,
