@@ -205,16 +205,16 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
     feature_values_for_plot = X_test.iloc[slider_idx, :]
     feature_names_for_plot = X_test.columns.tolist()
 
-    # Call force_plot and capture the figure object
-    fig = shap.force_plot(
-        expected_value_for_plot,
-        shap_values_for_plot,
-        feature_values_for_plot, # Now a 1D Pandas Series
-        feature_names=feature_names_for_plot, # Explicitly pass feature names
-        matplotlib=True, # Keep matplotlib=True
+    # Call force_plot without matplotlib=True and let st.write render the JS plot
+    st.write(
+        shap.force_plot(
+            expected_value_for_plot,
+            shap_values_for_plot,
+            feature_values_for_plot,
+            feature_names=feature_names_for_plot,
+            # Removed matplotlib=True to avoid potential Matplotlib backend issues in Streamlit
+        )
     )
-    # Pass the figure object to st.pyplot()
-    st.pyplot(fig)
 
 
 def show_local_interpretation(
