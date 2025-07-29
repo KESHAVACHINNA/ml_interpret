@@ -199,13 +199,18 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
         expected_value_for_plot = explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
         shap_values_for_plot = shap_values[slider_idx, :]
 
-    # Change: Pass X_test.iloc[slider_idx, :] (Pandas Series) directly as features
-    # SHAP's force_plot is generally robust with Pandas Series, inferring feature names from the index.
+    # Change: Pass a 2D NumPy array for the single instance, and explicitly provide feature names.
+    # This addresses the IndexError from shap.plots._force.py by providing the expected 2D structure
+    # and ensuring feature names are correctly associated.
+    feature_values_for_plot = X_test.iloc[slider_idx:slider_idx+1, :].values
+    feature_names_for_plot = X_test.columns.tolist()
+
     st.write(
         shap.force_plot(
             expected_value_for_plot,
             shap_values_for_plot,
-            X_test.iloc[slider_idx, :], # Pass the Pandas Series here
+            feature_values_for_plot, # Ensure this is a 2D array (1, num_features)
+            feature_names=feature_names_for_plot # Explicitly provide feature names
         )
     )
 
