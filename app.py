@@ -2,63 +2,80 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import shap
-import seaborn as sns
+import eli5
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
-from sklearn.datasets import load_iris
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
 
-st.set_page_config(layout="wide")
+# Setup Streamlit
+st.set_page_config(page_title="ML Interpretation App", layout="wide")
+st.title("📊 BlackBox ML Classifier Explainer")
 
-@st.cache_data
-def load_data():
-    data = load_iris()
-    X = pd.DataFrame(data.data, columns=data.feature_names)
-    y = pd.Series(data.target)
-    return X, y, data.target_names
+# Function to load and process uploaded data
+def load_data(file):
+    df = pd.read_csv(file)
+    return df
 
-def train_model(X, y):
-    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
-    clf = RandomForestClassifier(random_state=42)
-    clf.fit(X_train, y_train)
-    pred = clf.predict(X_test)
-    return clf, X_train, X_test, y_train, y_test, pred
+# Sidebar upload
+st.sidebar.header("Upload Dataset")
+file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
-def show_perf_metrics(y_test, pred):
-    report = classification_report(y_test, pred, output_dict=True)
-    st.sidebar.subheader("Classification Report")
-    st.sidebar.dataframe(pd.DataFrame(report).transpose().round(2))
-    
-    labels = sorted(list(set(y_test)))
-    conf_matrix = confusion_matrix(y_test, pred, labels=labels)
-    plt.figure(figsize=(6, 4))
-    sns.set(font_scale=1.2)
-    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='YlGnBu', xticklabels=labels, yticklabels=labels)
-    plt.title("Confusion Matrix")
-    st.sidebar.pyplot(plt)
+if file:
+    df = load_data(file)
+    st.subheader("Dataset Preview")
+    st.dataframe(df.head())
 
-def show_global_interpretation_shap(X_train, clf):
-    explainer = shap.TreeExplainer(clf)
-    shap_values = explainer.shap_values(X_train)
+    # Select target and features
+    target = st.sidebar.selectbox("Select Target Column", df.columns)
+    features = st.sidebar.multiselect("Select Feature Columns", [col for col in df.columns if col != target])
 
-    st.subheader("SHAP Summary Plot")
-    for i in range(len(shap_values)):
-        st.markdown(f"**Class {i}**")
+    if features and target:
+        X = df[features]
+        y = df[target]
+
+        # Encode target if categorical
+        if y.dtype == 'O':
+            le = LabelEncoder()
+            y = le.fit_transform(y)
+
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+        # Train classifier
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train, y_train)
+        pred = clf.predict(X_test)
+
+        # Metrics
+        st.subheader("Classification Report")
+        report = classification_report(y_test, pred, output_dict=True)
+        st.dataframe(pd.DataFrame(report).transpose())
+
+        st.subheader("Confusion Matrix")
+        conf_matrix = confusion_matrix(y_test, pred)
+        sns.heatmap(conf_matrix, annot=True, fmt="d", cmap="YlGnBu")
+        st.pyplot(plt)
+
+        # SHAP global
+        st.subheader("SHAP Global Feature Importance")
+        explainer = shap.TreeExplainer(clf)
+        shap_values = explainer.shap_values(X_test)
+
         fig, ax = plt.subplots()
-        shap.summary_plot(shap_values[i], X_train, plot_type="bar", show=False)
+        shap.summary_plot(shap_values, X_test, plot_type="bar", show=False)
         st.pyplot(fig)
 
-def main():
-    st.title("🔍 ML Interpretability App")
-    st.markdown("Explains model predictions using SHAP and performance metrics.")
+        # SHAP local
+        st.subheader("SHAP Local Explanation (Single Prediction)")
+        index = st.slider("Choose Index for Explanation", 0, len(X_test)-1, 0)
 
-    X, y, class_names = load_data()
-    clf, X_train, X_test, y_train, y_test, pred = train_model(X, y)
-
-    show_perf_metrics(y_test, pred)
-    show_global_interpretation_shap(X_train, clf)
-
-if __name__ == "__main__":
-    main()
+        fig2 = shap.plots.waterfall(shap.Explanation(values=shap_values[1][index],
+                                                     base_values=explainer.expected_value[1],
+                                                     data=X_test.iloc[index]), show=False)
+        st.pyplot(fig2)
+else:
+    st.info("Upload a CSV file to start.")
