@@ -1,13 +1,11 @@
 streamlit
 pandas
 numpy
+shap
+eli5
 scikit-learn
 matplotlib
 seaborn
-altair
-shap
-eli5
 xgboost
 lightgbm
 joblib
-pdpbox
