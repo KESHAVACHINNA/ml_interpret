@@ -65,7 +65,7 @@ def encode_data(data, targetcol):
     X.columns = ["".join(c if c.isalnum() else "_" for c in str(x)) for x in X.columns]
     features = X.columns
     data[targetcol] = data[targetcol].astype("object")
-    target_labels = data[targetcol].unique()
+    target_labels = pd.Series(data[targetcol]).unique() # Ensure target_labels is a list/array
     y = pd.factorize(data[targetcol])[0]
     return X, y, features, target_labels
 
@@ -81,10 +81,11 @@ def splitdata(X, y):
 def make_pred(dim_model, X_test, clf):
     """get y_pred using the classifier"""
     if dim_model == "XGBoost":
+        # XGBoost predict with DMatrix
         pred = clf.predict(DMatrix(X_test))
     elif dim_model == "lightGBM":
         pred = clf.predict(X_test)
-    else:
+    else: # RandomForestClassifier
         pred = clf.predict(X_test)
     return pred
 
@@ -92,15 +93,16 @@ def make_pred(dim_model, X_test, clf):
 def show_global_interpretation_eli5(X_train, y_train, features, clf, dim_model):
     """show most important features via permutation importance in ELI5"""
     if dim_model == "XGBoost":
+        # For XGBoost, eli5.explain_weights_df might take the booster directly
         df_global_explain = eli5.explain_weights_df(
-            clf, feature_names=features.values, top=5
+            clf, feature_names=features.tolist(), top=5 # Pass feature names as a list
         ).round(2)
     else:
         perm = PermutationImportance(clf, n_iter=2, random_state=1).fit(
             X_train, y_train
         )
         df_global_explain = eli5.explain_weights_df(
-            perm, feature_names=features.values, top=5
+            perm, feature_names=features.tolist(), top=5 # Pass feature names as a list
         ).round(2)
     bar = (
         alt.Chart(df_global_explain)
@@ -164,7 +166,7 @@ def show_local_interpretation_eli5(
         local_interpretation = eli5.show_prediction(
             clf,
             doc=dataset.iloc[slider_idx, :],
-            target_names=target_labels,
+            target_names=target_labels.tolist(), # Ensure target names are a list
             show_feature_values=True,
             top=5,
             targets=[True],
@@ -197,16 +199,13 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
         expected_value_for_plot = explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
         shap_values_for_plot = shap_values[slider_idx, :]
 
-    # Crucial change: Ensure the 'features' argument to force_plot is a 2D array (even for a single sample)
-    # Using .iloc[slider_idx:slider_idx+1, :] on the DataFrame ensures a 2D structure, then .values converts to NumPy array.
-    feature_values_for_plot = X_test.iloc[slider_idx:slider_idx+1, :].values 
-
+    # Change: Pass X_test.iloc[slider_idx, :] (Pandas Series) directly as features
+    # SHAP's force_plot is generally robust with Pandas Series, inferring feature names from the index.
     st.write(
         shap.force_plot(
             expected_value_for_plot,
             shap_values_for_plot,
-            feature_values_for_plot, # Pass the 2D NumPy array here
-            feature_names=X_test.columns.tolist() # Provide feature names explicitly for better display
+            X_test.iloc[slider_idx, :], # Pass the Pandas Series here
         )
     )
 
