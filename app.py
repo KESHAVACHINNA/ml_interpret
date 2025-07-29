@@ -1,334 +1,172 @@
 import streamlit as st
 import pandas as pd
-
-# ml
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report, confusion_matrix
-import lightgbm as lgb
-import xgboost as xgb
-from xgboost import DMatrix
-
-# plotting
-import matplotlib.pyplot as plt
-import seaborn as sns
-import altair as alt
-
-# interpretation
+import numpy as np
+import shap
 import eli5
 from eli5.sklearn import PermutationImportance
-from pdpbox import pdp
-import shap
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from sklearn.datasets import load_iris
+from sklearn.metrics import classification_report
 
-# Title and Subheader
-st.title("ML Interpreter")
-st.subheader("Blackblox ML classifiers visually explained")
+# Set Streamlit page configuration
+st.set_page_config(layout="wide", page_title="ML Interpretability App")
 
+st.title("💡 ML Interpretability App")
+st.write("A Streamlit web app to visualize and understand how machine learning models make predictions using SHAP and ELI5.")
 
-def upload_data(uploaded_file, dim_data):
-    if uploaded_file is not None:
-        st.sidebar.success("File uploaded!")
-        df = pd.read_csv(uploaded_file, encoding="utf8")
-        # replace all non alphanumeric column names to avoid lgbm issue
-        df.columns = [
-            "".join(c if c.isalnum() else "_" for c in str(x)) for x in df.columns
-        ]
-        # make the last col the default outcome
-        col_arranged = df.columns[:-1].insert(0, df.columns[-1])
-        target_col = st.sidebar.selectbox(
-            "Then choose the target variable", col_arranged
-        )
-        X, y, features, target_labels = encode_data(df, target_col)
-    elif dim_data == "iris":
-        df = sns.load_dataset("iris")
-        target_col = "species"
-        X, y, features, target_labels = encode_data(df, target_col)
-    elif dim_data == "titanic":
-        df = sns.load_dataset("titanic").drop(
-            columns=["class", "who", "adult_male", "deck", "alive", "alone"]
-        )
-        target_col = "survived"
-        X, y, features, target_labels = encode_data(df, target_col)
-    elif dim_data == "census income":
-        X, y = shap.datasets.adult()
-        features = X.columns
-        target_labels = pd.Series(y).unique()
-        df = pd.concat([X, pd.DataFrame(y, columns=["Outcome"])], axis=1)
-    return df, X, y, features, target_labels
+# --- Load and Prepare Data ---
+@st.cache_data
+def load_data():
+    iris = load_iris()
+    df = pd.DataFrame(data=iris.data, columns=iris.feature_names)
+    df['target'] = iris.target
+    df['target_names'] = df['target'].map(lambda x: iris.target_names[x])
+    return df, iris.feature_names, iris.target_names
 
+df, feature_names, target_names = load_data()
 
-def encode_data(data, targetcol):
-    """preprocess categorical value"""
-    X = pd.get_dummies(data.drop(targetcol, axis=1)).fillna(0)
-    X.columns = ["".join(c if c.isalnum() else "_" for c in str(x)) for x in X.columns]
-    features = X.columns
-    data[targetcol] = data[targetcol].astype("object")
-    target_labels = data[targetcol].unique()
-    y = pd.factorize(data[targetcol])[0]
-    return X, y, features, target_labels
+# --- Sidebar for Model Selection and Training ---
+st.sidebar.header("⚙️ Model Configuration")
 
+model_choice = st.sidebar.selectbox(
+    "Select Classifier",
+    ("Random Forest", "XGBoost", "LightGBM")
+)
 
-def splitdata(X, y):
-    """split dataset into trianing & testing"""
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, train_size=0.80, random_state=0
-    )
-    return X_train, X_test, y_train, y_test
+# Train the model
+X = df[feature_names]
+y = df['target']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
+model = None
+if model_choice == "Random Forest":
+    n_estimators = st.sidebar.slider("Number of Estimators", 50, 500, 100)
+    max_depth = st.sidebar.slider("Max Depth", 2, 20, 10)
+    model = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, random_state=42)
+elif model_choice == "XGBoost":
+    n_estimators = st.sidebar.slider("Number of Estimators", 50, 500, 100)
+    max_depth = st.sidebar.slider("Max Depth", 2, 20, 5)
+    learning_rate = st.sidebar.slider("Learning Rate", 0.01, 0.3, 0.1, 0.01)
+    model = XGBClassifier(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate, use_label_encoder=False, eval_metric='mlogloss', random_state=42)
+elif model_choice == "LightGBM":
+    n_estimators = st.sidebar.slider("Number of Estimators", 50, 500, 100)
+    max_depth = st.sidebar.slider("Max Depth", 2, 20, 10)
+    learning_rate = st.sidebar.slider("Learning Rate", 0.01, 0.3, 0.1, 0.01)
+    model = LGBMClassifier(n_estimators=n_estimators, max_depth=max_depth, learning_rate=learning_rate, random_state=42)
 
-def make_pred(dim_model, X_test, clf):
-    """get y_pred using the classifier"""
-    if dim_model == "XGBoost":
-        pred = clf.predict(DMatrix(X_test))
-    elif dim_model == "lightGBM":
-        pred = clf.predict(X_test)
-    else:
-        pred = clf.predict(X_test)
-    return pred
+if st.sidebar.button("Train Model"):
+    with st.spinner(f"Training {model_choice} model..."):
+        model.fit(X_train, y_train)
+    st.sidebar.success(f"{model_choice} Model Trained Successfully!")
+    st.session_state['model'] = model
+    st.session_state['X_test'] = X_test
+    st.session_state['y_test'] = y_test
+else:
+    if 'model' not in st.session_state:
+        st.info("Train a model from the sidebar to see results.")
 
+# --- Main Content Area ---
 
-def show_global_interpretation_eli5(X_train, y_train, features, clf, dim_model):
-    """show most important features via permutation importance in ELI5"""
-    if dim_model == "XGBoost":
-        df_global_explain = eli5.explain_weights_df(
-            clf, feature_names=features.values, top=5
-        ).round(2)
-    else:
-        perm = PermutationImportance(clf, n_iter=2, random_state=1).fit(
-            X_train, y_train
-        )
-        df_global_explain = eli5.explain_weights_df(
-            perm, feature_names=features.values, top=5
-        ).round(2)
-    bar = (
-        alt.Chart(df_global_explain)
-        .mark_bar(color="red", opacity=0.6, size=16)
-        .encode(x="weight", y=alt.Y("feature", sort="-x"), tooltip=["weight"])
-        .properties(height=160)
-    )
-    st.write(bar)
+if 'model' in st.session_state:
+    model = st.session_state['model']
+    X_test = st.session_state['X_test']
+    y_test = st.session_state['y_test']
 
+    st.subheader("📊 Model Performance")
+    y_pred = model.predict(X_test)
+    report = classification_report(y_test, y_pred, target_names=target_names, output_dict=True)
+    st.json(report)
 
-def show_global_interpretation_shap(X_train, clf):
-    """show most important features via permutation importance in SHAP"""
-    explainer = shap.TreeExplainer(clf)
-    shap_values = explainer.shap_values(X_train)
-    shap.summary_plot(
-        shap_values,
-        X_train,
-        plot_type="bar",
-        max_display=5,
-        plot_size=(12, 5),
-        color=plt.get_cmap("tab20b"),
-        show=False,
-        color_bar=False,
-    )
-    st.pyplot()
+    st.subheader("📋 Sample Data")
+    st.dataframe(X_test.head())
 
-
-def filter_misclassified(X_test, y_test, pred):
-    """get misclassified instances"""
-    idx_misclassified = pred != y_test
-    X_test_misclassified = X_test[idx_misclassified]
-    y_test_misclassified = y_test[idx_misclassified]
-    pred_misclassified = pred[idx_misclassified]
-    return X_test_misclassified, y_test_misclassified, pred_misclassified
-
-
-def show_local_interpretation_eli5(
-    dataset, clf, pred, target_labels, features, dim_model, slider_idx
-):
-    info_local = st.button("How this works")
-    if info_local:
-        st.info()
-
-    if dim_model == "XGBoost":
-        local_interpretation = eli5.show_prediction(
-            clf, doc=dataset.iloc[slider_idx, :], show_feature_values=True, top=5
-        )
-    else:
-        local_interpretation = eli5.show_prediction(
-            clf,
-            doc=dataset.iloc[slider_idx, :],
-            target_names=target_labels,
-            show_feature_values=True,
-            top=5,
-            targets=[True],
-        )
-    st.markdown(
-        local_interpretation.data.replace("\n", ""), unsafe_allow_html=True,
-    )
-
-
-def show_local_interpretation_shap(clf, X_test, pred, slider_idx):
-    """show the interpretation of individual decision points"""
-    info_local = st.button("How this works")
-    if info_local:
-        st.info(
-            """
-        This chart illustrates how each feature collectively influence the prediction outcome.
-        Features in the red make it more likely to be the predicted class, and the features in blue pushing back leftward reduce the likelihood. [Read more about forceplot](https://github.com/slundberg/shap)  
-        Please note that the explanation here is always based on the predicted class rather than the positive class (i.e. if predicted class is 0, to the right means more likely to be 0) to cater for multi-class senaiors.
-        """
-        )
-    explainer = shap.TreeExplainer(clf)
+    st.subheader("🔍 Global Feature Importance (SHAP Beeswarm Plot)")
+    st.write("The SHAP beeswarm plot shows the overall impact of each feature on the model's predictions.")
+    explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_test)
-    # the predicted class for the selected instance
-    pred_i = int(pred[slider_idx])
-    # this illustrates why the model predict this particular outcome
-    shap.force_plot(
-        explainer.expected_value[pred_i],
-        shap_values[pred_i][slider_idx, :],
-        X_test.iloc[slider_idx, :],
-        matplotlib=True,
-    )
-    st.pyplot()
 
+    # SHAP beeswarm plot for multiclass classification
+    # For multiclass, shap_values is a list of arrays, one for each class.
+    # We can visualize the mean absolute SHAP value across all classes for each feature,
+    # or choose a specific class. For simplicity, we'll plot for a chosen class.
+    # A more advanced app might allow selection of class for beeswarm.
+    # Here, we'll take the sum of absolute SHAP values across classes to represent overall importance.
+    
+    # Calculate mean absolute SHAP value across all classes for each feature
+    if isinstance(shap_values, list): # For multiclass models
+        mean_abs_shap = np.mean(np.abs(np.array(shap_values)), axis=0)
+        shap.summary_plot(mean_abs_shap, X_test, feature_names=feature_names, plot_type="beeswarm", show=False)
+    else: # For binary or single output models (though Iris is multiclass)
+        shap.summary_plot(shap_values, X_test, feature_names=feature_names, plot_type="beeswarm", show=False)
+    
+    st.pyplot(plt.gcf(), bbox_inches='tight')
+    plt.clf() # Clear the plot to prevent overlapping
 
-def show_local_interpretation(
-    X_test, y_test, clf, pred, target_labels, features, dim_model, dim_framework
-):
-    """show the interpretation based on the selected framework"""
-    n_data = X_test.shape[0]
-    slider_idx = st.slider("Which datapoint to explain", 0, n_data - 1)
+    st.subheader("🔬 Local Prediction Explanation (SHAP Force Plot)")
+    st.write("The SHAP force plot visualizes how features contribute to a single prediction.")
+    
+    instance_index = st.slider("Select an instance from the test set", 0, len(X_test) - 1, 0)
+    selected_instance = X_test.iloc[[instance_index]]
 
-    st.text(
-        "Prediction: "
-        + str(target_labels[int(pred[slider_idx])])
-        + " | Actual label: "
-        + str(target_labels[int(y_test[slider_idx])])
-    )
+    # For multiclass, explainer.shap_values returns a list of arrays (one per class).
+    # We need to select the shap_values for the predicted class.
+    predicted_class_index = model.predict(selected_instance)[0]
 
-    if dim_framework == "SHAP":
-        show_local_interpretation_shap(clf, X_test, pred, slider_idx)
-    elif dim_framework == "ELI5":
-        show_local_interpretation_eli5(
-            X_test, clf, pred, target_labels, features, dim_model, slider_idx
+    # Initialize JS for SHAP
+    shap.initjs()
+    
+    if isinstance(shap_values, list): # Multiclass
+        # Ensure we have the explainer for the chosen class to get base_values correctly
+        explainer_for_class = shap.TreeExplainer(model, feature_perturbation="tree_path_dependent")
+        # Base value for the specific predicted class
+        base_value_for_class = explainer_for_class.expected_value[predicted_class_index]
+        
+        # SHAP values for the specific predicted class and instance
+        shap_values_instance_for_class = explainer_for_class.shap_values(selected_instance)[predicted_class_index]
+
+        # Use st.components.v1.html to render the force plot (requires JS)
+        force_plot_html = shap.force_plot(
+            base_value_for_class, 
+            shap_values_instance_for_class, 
+            selected_instance,
+            show=False,
+            matplotlib=False # Set to False to get HTML for Streamlit
+        )
+    else: # Binary or single output (not applicable to Iris, but for completeness)
+        force_plot_html = shap.force_plot(
+            explainer.expected_value,
+            explainer.shap_values(selected_instance),
+            selected_instance,
+            show=False,
+            matplotlib=False
         )
 
+    # Convert the HTML object to a string and embed it
+    st.components.v1.html(force_plot_html.html(), height=300)
 
-def show_perf_metrics(y_test, pred):
-    """show model performance metrics such as classification report or confusion matrix"""
-    report = classification_report(y_test, pred, output_dict=True)
-    st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
-    conf_matrix = confusion_matrix(y_test, pred, list(set(y_test)))
-    sns.set(font_scale=1.4)
-    sns.heatmap(
-        conf_matrix,
-        square=True,
-        annot=True,
-        annot_kws={"size": 15},
-        cmap="YlGnBu",
-        cbar=False,
-    )
-    st.sidebar.pyplot()
+    st.subheader("🧠 Feature Weights (ELI5 Permutation Importance)")
+    st.write("ELI5 permutation importance shows how much the model's performance decreases when a feature is randomly shuffled (permuted).")
+    
+    # For multiclass, ELI5 needs a specific class to compute importance for or it averages.
+    # Let's compute for all classes and display a table.
+    perm_importance = PermutationImportance(model, random_state=42)
+    perm_importance.fit(X_test, y_test)
 
+    eli5_weights = eli5.format_as_html(eli5.show_weights(perm_importance, feature_names=feature_names, target_names=target_names))
+    st.components.v1.html(eli5_weights, height=500, scrolling=True)
 
-def draw_pdp(clf, dataset, features, target_labels, dim_model):
-    """draw pdpplot given a model, data, all the features and the selected feature to plot"""
+else:
+    st.info("Train a model from the sidebar to visualize interpretability results.")
 
-    if dim_model != "XGBoost":
-        selected_col = st.selectbox("Select a feature", features)
-        st.info(
-      
-        )
-
-        pdp_dist = pdp.pdp_isolate(
-            model=clf, dataset=dataset, model_features=features, feature=selected_col
-        )
-        if len(target_labels) <= 5:
-            ncol = len(target_labels)
-        else:
-            ncol = 5
-        pdp.pdp_plot(pdp_dist, selected_col, ncols=ncol, figsize=(12, 5))
-        st.pyplot()
-
-
-def main():
-    dim_data = st.sidebar.selectbox(
-        "Try out sample data", ("iris", "titanic", "census income")
-    )
-    uploaded_file = st.sidebar.file_uploader("Or upload a CSV file", type="csv")
-
-    df, X, y, features, target_labels = upload_data(uploaded_file, dim_data)
-
-    X_train, X_test, y_train, y_test = splitdata(X, y)
-    dim_model = st.sidebar.selectbox(
-        "Choose a model", ("XGBoost", "lightGBM", "randomforest")
-    )
-    if dim_model == "randomforest":
-        clf = RandomForestClassifier(n_estimators=500, random_state=0, n_jobs=-1)
-        clf.fit(X_train, y_train)
-    elif dim_model == "lightGBM":
-        if len(target_labels) > 2:
-            clf = lgb.LGBMClassifier(
-                class_weight="balanced", objective="multiclass", n_jobs=-1, verbose=-1
-            )
-        else:
-            clf = lgb.LGBMClassifier(objective="binary", n_jobs=-1, verbose=-1)
-        clf.fit(X_train, y_train)
-    elif dim_model == "XGBoost":
-        params = {
-            "max_depth": 5,
-            "silent": 1,
-            "random_state": 2,
-            "num_class": len(target_labels),
-        }
-        dmatrix = DMatrix(data=X_train, label=y_train)
-        clf = xgb.train(params=params, dtrain=dmatrix)
-    pred = make_pred(dim_model, X_test, clf)
-
-    dim_framework = st.sidebar.radio(
-        "Choose interpretation framework", ["SHAP", "ELI5"]
-    )
-    if st.sidebar.checkbox("Preview uploaded data"):
-        st.sidebar.dataframe(df.head())
-    st.sidebar.markdown("#### Classification report")
-    show_perf_metrics(y_test, pred)
-    st.markdown("#### Global Interpretation")
-    st.text("Most important features")
-    info_global = st.button("How it is calculated")
-    if info_global:
-        st.info()
-    if dim_framework == "SHAP":
-        show_global_interpretation_shap(X_train, clf)
-    elif dim_framework == "ELI5":
-        show_global_interpretation_eli5(X_train, y_train, features, clf, dim_model)
-
-    if st.sidebar.button("About the app"):
-        st.sidebar.markdown(
-        )
-        st.sidebar.markdown(
-            '<a href="https://ctt.ac/zu8S4"><img src="https://image.flaticon.com/icons/svg/733/733579.svg" width=16></a>',
-            unsafe_allow_html=True,
-        )
-    st.markdown("#### Local Interpretation")
-
-    # misclassified
-    if st.checkbox("Filter for misclassified"):
-        X_test, y_test, pred = filter_misclassified(X_test, y_test, pred)
-        if X_test.shape[0] == 0:
-            st.text("No misclassification🎉")
-        else:
-            st.text(str(X_test.shape[0]) + " misclassified total")
-            show_local_interpretation(
-                X_test,
-                y_test,
-                clf,
-                pred,
-                target_labels,
-                features,
-                dim_model,
-                dim_framework,
-            )
-    else:
-        show_local_interpretation(
-            X_test, y_test, clf, pred, target_labels, features, dim_model, dim_framework
-        )
-    if dim_model != "XGBoost" and st.checkbox("Show how features vary with outcome"):
-        draw_pdp(clf, X_train, features, target_labels, dim_model)
-
-
-if __name__ == "__main__":
-    main()
+st.markdown("---")
+st.markdown("💡 Features:")
+st.markdown("- 🧪 Select and train classifiers (Random Forest, XGBoost, LightGBM) on the Iris dataset.")
+st.markdown("- 📊 View classification reports and sample data.")
+st.markdown("- 🔍 Visualize global feature importance using **SHAP beeswarm plots**.")
+st.markdown("- 🔬 Understand local predictions using **SHAP force plots**.")
+st.markdown("- 🧠 Analyze feature weights with **ELI5 permutation importance**.")
