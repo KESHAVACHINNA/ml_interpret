@@ -6,7 +6,7 @@ import re # Make sure 're' is imported for column sanitization
 # ml
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import LabelEncoder, SimpleImputer
+from sklearn.preprocessing import LabelEncoder, SimpleImputer # This is the line causing your ImportError
 from sklearn.metrics import classification_report, confusion_matrix
 import lightgbm as lgb
 import xgboost as xgb
@@ -60,14 +60,12 @@ def upload_data(uploaded_file, dim_data_choice):
         )
     elif dim_data_choice == "census income":
         X_shap, y_shap = shap.datasets.adult()
-        # THIS IS THE CRITICAL LINE. ENSURE IT IS EXACTLY AS BELOW.
         df = pd.concat([X_shap, pd.DataFrame(y_shap, columns=["outcome"])], axis=1)
 
     if df is not None:
         # Robust column name sanitization
         df.columns = df.columns.str.strip()
         df.columns = df.columns.str.lower().str.replace(" ", "_")
-        # Use re.sub for more robust removal of non-alphanumeric/underscore characters
         df.columns = [re.sub(r'[^a-z0-9_]', '', col) for col in df.columns]
 
 
@@ -98,14 +96,13 @@ def encode_data(data, target_col):
         # Drop original categorical columns and concatenate one-hot encoded ones
         X_df = pd.concat([X_df.drop(columns=categorical_cols), X_encoded_categorical], axis=1)
 
-    # Ensure all column names are valid for LightGBM/XGBoost (already done by sanitization in upload_data)
-    # Re-sanitize if get_dummies introduces new problematic characters (e.g., from categories)
+    # Ensure all column names are valid for LightGBM/XGBoost
     X_df.columns = [re.sub(r'[^a-z0-9_]', '', col) for col in X_df.columns]
     features = X_df.columns
 
     # Factorize target variable (y)
     target_labels = y_series.unique()
-    y = pd.factorize(y_series)[0] # Corrected: Access the codes array from the tuple
+    y = pd.factorize(y_series)[0]
 
     return X_df, y, features, target_labels
 
@@ -291,7 +288,7 @@ def show_local_interpretation(
     X_test, y_test, clf, pred, target_labels, features, dim_model, dim_framework
 ):
     """Show the interpretation based on the selected framework"""
-    n_data = X_test.shape[0] # Corrected: Get number of rows
+    n_data = X_test.shape[0]
     if n_data == 0:
         st.text("No data points to explain.")
         return
