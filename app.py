@@ -5,6 +5,7 @@ import shap
 import eli5
 import matplotlib.pyplot as plt
 import seaborn as sns
+import joblib
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, cross_val_score
@@ -13,8 +14,12 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 import warnings
-warnings.filterwarnings("ignore")
+import streamlit.components.v1 as components
+import base64
+import tempfile
+import os
 
+warnings.filterwarnings("ignore")
 st.set_page_config(page_title="Advanced ML Interpretability", layout="wide")
 st.title("🔍 Advanced Machine Learning Interpretability Dashboard")
 
@@ -42,7 +47,21 @@ def get_model(model_name):
     elif model_name == "LogisticRegression":
         return LogisticRegression(max_iter=1000)
 
-# Main App
+# Force plot renderer workaround
+def render_force_plot_html(explainer, shap_vals, sample):
+    force_html = shap.plots.force(
+        explainer.expected_value[0] if isinstance(explainer.expected_value, np.ndarray) else explainer.expected_value,
+        shap_vals.values,
+        sample,
+        matplotlib=False,
+        show=False
+    )
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as f:
+        shap.save_html(f.name, force_html)
+        with open(f.name, "r") as f_read:
+            components.html(f_read.read(), height=350)
+        os.unlink(f.name)
+
 if file is not None:
     df = pd.read_csv(file)
     df = preprocess(df)
@@ -78,6 +97,7 @@ if file is not None:
     scores = cross_val_score(model, X_scaled, y, cv=5)
     st.write(f"Average Accuracy: {scores.mean():.2f} ± {scores.std():.2f}")
 
+    # ROC Curve
     if len(np.unique(y)) == 2:
         st.subheader("📈 ROC Curve")
         y_proba = model.predict_proba(X_test)[:, 1]
@@ -91,6 +111,7 @@ if file is not None:
         ax.legend()
         st.pyplot(fig)
 
+    # SHAP
     st.subheader("📌 SHAP Summary Plot")
     explainer = shap.Explainer(model, X_train)
     shap_values = explainer(X_test)
@@ -99,15 +120,14 @@ if file is not None:
     st.pyplot(fig)
 
     st.subheader("📌 SHAP Dependence Plot")
-    feature_name = st.selectbox("Select Feature", features)
+    feature_name = st.selectbox("Select Feature for Dependence Plot", features)
     fig, ax = plt.subplots()
     shap.dependence_plot(feature_name, shap_values.values, X_test, show=False)
     st.pyplot(fig)
 
     st.subheader("📌 SHAP Force Plot")
     idx = st.slider("Sample Index", 0, len(X_test) - 1, 0)
-    force_plot_html = shap.plots.force(explainer.expected_value[0], shap_values.values[idx], X_test[idx], matplotlib=False)
-    st.components.v1.html(shap.save_html(force_plot_html), height=300)
+    render_force_plot_html(explainer, shap_values[idx], X_test[idx])
 
     if hasattr(model, "feature_importances_"):
         st.subheader("📌 Feature Importances")
@@ -118,9 +138,9 @@ if file is not None:
         st.pyplot(fig)
 
     st.subheader("📎 ELI5 Model Explanation")
-    with st.expander("Show Weights"):
+    with st.expander("Show Weights / Feature Importance"):
         html_expl = eli5.show_weights(model, feature_names=features)
-        st.components.v1.html(html_expl.data, height=400)
+        components.html(html_expl.data, height=400, scrolling=True)
 
     st.success("✅ Model interpretation complete!")
 else:
