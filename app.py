@@ -142,7 +142,7 @@ def show_local_interpretation_eli5(
 ):
     info_local = st.button("How this works")
     if info_local:
-        st.info()
+        st.info("ELI5 shows the contribution of each feature to a specific prediction. Positive weights indicate features that push the prediction towards the positive class, while negative weights push it towards the negative class.")
 
     if dim_model == "XGBoost":
         local_interpretation = eli5.show_prediction(
@@ -165,7 +165,7 @@ def show_local_interpretation_eli5(
 def show_local_interpretation_shap(clf, X_test, pred, slider_idx):
     info_local = st.button("How this works")
     if info_local:
-        st.info()
+        st.info("SHAP (SHapley Additive exPlanations) explains the prediction of an instance by showing the contribution of each feature value to the prediction. It calculates Shapley values, which represent the average marginal contribution of a feature value across all possible coalitions of features.")
     explainer = shap.TreeExplainer(clf)
     shap_values = explainer.shap_values(X_test)
     # the predicted class for the selected instance
@@ -202,43 +202,21 @@ def show_local_interpretation(
         )
 
 
-import streamlit as st
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.metrics import classification_report, confusion_matrix
-
 def show_perf_metrics(y_test, pred):
-    """Show model performance metrics such as classification report and confusion matrix"""
-
-    # Classification Report
+    """show model performance metrics such as classification report or confusion matrix"""
     report = classification_report(y_test, pred, output_dict=True)
-    st.sidebar.subheader("Classification Report")
-    st.sidebar.dataframe(pd.DataFrame(report).round(2).transpose())
-
-    # Confusion Matrix
-    labels = sorted(list(set(y_test) | set(pred)))  # ensures all unique classes are included
-    conf_matrix = confusion_matrix(y_test, pred, labels=labels)
-
-    fig, ax = plt.subplots()
-    sns.set(font_scale=1.2)
+    st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
+    conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test)))
+    sns.set(font_scale=1.4)
     sns.heatmap(
         conf_matrix,
+        square=True,
         annot=True,
-        fmt="d",
+        annot_kws={"size": 15},
         cmap="YlGnBu",
         cbar=False,
-        square=True,
-        xticklabels=labels,
-        yticklabels=labels,
-        ax=ax
     )
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Actual")
-    ax.set_title("Confusion Matrix")
-    
-    st.sidebar.pyplot(fig)
-
+    st.sidebar.pyplot()
 
 
 def draw_pdp(clf, dataset, features, target_labels, dim_model):
@@ -246,7 +224,7 @@ def draw_pdp(clf, dataset, features, target_labels, dim_model):
 
     if dim_model != "XGBoost":
         selected_col = st.selectbox("Select a feature", features)
-        st.info()
+        st.info("A Partial Dependence Plot (PDP) shows the marginal effect of one or two features on the predicted outcome of a machine learning model. It helps to visualize how a feature influences the prediction on average.")
 
         pdp_dist = pdp.pdp_isolate(
             model=clf, dataset=dataset, model_features=features, feature=selected_col
@@ -258,6 +236,22 @@ def draw_pdp(clf, dataset, features, target_labels, dim_model):
         pdp.pdp_plot(pdp_dist, selected_col, ncols=ncol, figsize=(12, 5))
         st.pyplot()
 
+def show_global_interpretation_shap(X_train, clf):
+    st.info("Global interpretation using SHAP summary plot. This plot shows which features are most important overall and how their values impact the model's output across all predictions.")
+    
+    explainer = shap.TreeExplainer(clf)
+    shap_values = explainer.shap_values(X_train)
+
+    st.set_option('deprecation.showPyplotGlobalUse', False)
+
+    if isinstance(shap_values, list):  # multiclass
+        for i, class_shap_values in enumerate(shap_values):
+            st.subheader(f"Class {i}")
+            shap.summary_plot(class_shap_shap_values, X_train, plot_type="bar", show=False)
+            st.pyplot()
+    else:  # binary or regression
+        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+        st.pyplot()
 
 def main():
     dim_data = st.sidebar.selectbox(
@@ -304,7 +298,7 @@ def main():
     st.text("Most important features")
     info_global = st.button("How it is calculated")
     if info_global:
-        st.info()
+        st.info("Global interpretation aims to understand the overall behavior of the model. It shows which features are generally most important across all predictions.")
     if dim_framework == "SHAP":
         show_global_interpretation_shap(X_train, clf)
     elif dim_framework == "ELI5":
@@ -312,6 +306,7 @@ def main():
 
     if st.sidebar.button("About the app"):
         st.sidebar.markdown(
+            "This app helps you interpret black-box machine learning models by providing global and local explanations. You can upload your own data or use sample datasets."
         )
         st.sidebar.markdown(
             '<a href="https://ctt.ac/zu8S4"><img src="https://image.flaticon.com/icons/svg/733/733579.svg" width=16></a>',
@@ -342,8 +337,3 @@ def main():
         )
     if dim_model != "XGBoost" and st.checkbox("Show how features vary with outcome"):
         draw_pdp(clf, X_train, features, target_labels, dim_model)
-
-def main():
-    ...
-    show_global_interpretation_shap(X_train, clf)  # ← This line throws error
-    ...
