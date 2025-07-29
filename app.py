@@ -125,7 +125,7 @@ def show_global_interpretation_shap(X_train, clf):
         color=plt.get_cmap("tab20b"),
         show=False,
         color_bar=False,
-        plot_component=0, # Ensure compatibility with multi-output models for bar plot
+        plot_component=0,
         ax=ax
     )
     st.pyplot(fig)
@@ -197,12 +197,16 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
         expected_value_for_plot = explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
         shap_values_for_plot = shap_values[slider_idx, :]
 
-    # Crucial change: Convert the Pandas Series to a NumPy array for features argument
+    # Crucial change: Ensure the 'features' argument to force_plot is a 2D array (even for a single sample)
+    # Using .iloc[slider_idx:slider_idx+1, :] on the DataFrame ensures a 2D structure, then .values converts to NumPy array.
+    feature_values_for_plot = X_test.iloc[slider_idx:slider_idx+1, :].values 
+
     st.write(
         shap.force_plot(
             expected_value_for_plot,
             shap_values_for_plot,
-            X_test.iloc[slider_idx, :].values, # Use .values here
+            feature_values_for_plot, # Pass the 2D NumPy array here
+            feature_names=X_test.columns.tolist() # Provide feature names explicitly for better display
         )
     )
 
@@ -267,10 +271,8 @@ def draw_pdp(clf, dataset, features, target_labels, dim_model):
         else:
             ncol = 5
         
-        fig, axes = plt.subplots(ncols=ncol, figsize=(12, 5))
-        # pdp.pdp_plot draws on the current active axes.
-        # Ensure that 'fig' is the current figure before calling pdp_plot if 'plot_ax' is not directly supported.
-        plt.figure(fig.number)
+        fig, axes = plt.subplots(ncols=ncol, figsize=(12, 5)) 
+        plt.figure(fig.number) # Set the current figure to the one we just created
         pdp.pdp_plot(pdp_dist, selected_col, plot_pts_vert=False, show_titles=True)
         st.pyplot(fig)
 
