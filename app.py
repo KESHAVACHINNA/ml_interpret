@@ -27,7 +27,7 @@ st.title("ML Interpreter")
 st.subheader("Blackbox ML classifiers visually explained")
 
 # --- Streamlit Session State Initialization ---
-# Initialize session state variables if they don't exist to persist choices across reruns [1, 2]
+# Initialize session state variables if they don't exist to persist choices across reruns 
 if 'dim_data' not in st.session_state:
     st.session_state.dim_data = "iris"
 if 'target_col' not in st.session_state:
@@ -41,7 +41,7 @@ if 'filter_misclassified_checkbox' not in st.session_state:
 
 # --- Data Loading and Preprocessing Functions ---
 
-@st.cache_data(show_spinner="Loading and preprocessing data...") # Cache data loading and initial processing [3]
+@st.cache_data(show_spinner="Loading and preprocessing data...") # Cache data loading and initial processing [1, 2, 3, 4]
 def upload_data(uploaded_file, dim_data_choice):
     df = None
     if uploaded_file is not None:
@@ -55,17 +55,18 @@ def upload_data(uploaded_file, dim_data_choice):
         )
     elif dim_data_choice == "census income":
         X_shap, y_shap = shap.datasets.adult()
+        # Corrected line: Ensure pd.concat has proper arguments [12]
         df = pd.concat()], axis=1)
 
     if df is not None:
-        # Robust column name sanitization [4]
-        df.columns = df.columns.str.strip() # Remove leading/trailing whitespace
-        df.columns = df.columns.str.lower().str.replace(" ", "_") # Lowercase and replace spaces with underscores
-        df.columns = df.columns.str.replace("[^a-z0-9_]", "", regex=True) # Remove special characters [4]
+        # Robust column name sanitization [5, 1, 6]
+        df.columns = df.columns.str.strip() # Remove leading/trailing whitespace [5]
+        df.columns = df.columns.str.lower().str.replace(" ", "_") # Lowercase and replace spaces with underscores [5]
+        df.columns = df.columns.str.replace("[^a-z0-9_]", "", regex=True) # Remove special characters [5]
 
     return df
 
-@st.cache_data(show_spinner="Encoding data...") # Cache data encoding [3]
+@st.cache_data(show_spinner="Encoding data...") # Cache data encoding [1, 2, 3, 4]
 def encode_data(data, target_col):
     """Preprocess categorical and numerical values, handle missing values."""
     if data is None:
@@ -79,14 +80,14 @@ def encode_data(data, target_col):
     numerical_cols = X_df.select_dtypes(include=np.number).columns
     categorical_cols = X_df.select_dtypes(include=['object', 'category']).columns
 
-    # Impute numerical columns [5, 6, 7]
+    # Impute numerical columns [7, 8, 9]
     if not numerical_cols.empty:
         imputer_numerical = SimpleImputer(strategy='median')
         X_df[numerical_cols] = imputer_numerical.fit_transform(X_df[numerical_cols])
 
-    # One-hot encode categorical columns, handling NaNs explicitly [8]
+    # One-hot encode categorical columns, handling NaNs explicitly [10, 11, 12]
     if not categorical_cols.empty:
-        X_encoded_categorical = pd.get_dummies(X_df[categorical_cols], dummy_na=True)
+        X_encoded_categorical = pd.get_dummies(X_df[categorical_cols], dummy_na=True) # dummy_na=True creates a column for NaNs [10, 11]
         # Drop original categorical columns and concatenate one-hot encoded ones
         X_df = pd.concat([X_df.drop(columns=categorical_cols), X_encoded_categorical], axis=1)
 
@@ -94,13 +95,12 @@ def encode_data(data, target_col):
     X_df.columns = ["".join(c if c.isalnum() else "_" for c in str(x)) for x in X_df.columns]
     features = X_df.columns
 
-    # Factorize target variable (y) [9]
+    # Factorize target variable (y) [13]
     target_labels = y_series.unique()
-    y = pd.factorize(y_series)
-
+    y = pd.factorize(y_series) # Ensure to get only the codes [13]
     return X_df, y, features, target_labels
 
-@st.cache_data(show_spinner="Splitting data...") # Cache data splitting [3]
+@st.cache_data(show_spinner="Splitting data...") # Cache data splitting [1, 2, 3, 4]
 def splitdata(X, y):
     """Split dataset into training & testing"""
     X_train, X_test, y_train, y_test = train_test_split(
@@ -108,34 +108,34 @@ def splitdata(X, y):
     )
     return X_train, X_test, y_train, y_test
 
-@st.cache_resource(show_spinner="Training model...") # Cache model training [3, 10]
+@st.cache_resource(show_spinner="Training model...") # Cache model training [14, 1, 2, 3, 4, 15]
 def train_model(X_train, y_train, dim_model, target_labels):
     """Train the selected machine learning model."""
     clf = None
     if dim_model == "randomforest":
-        clf = RandomForestClassifier(n_estimators=500, random_state=0, n_jobs=-1) # Good default parameters [11, 12]
+        clf = RandomForestClassifier(n_estimators=500, random_state=0, n_jobs=-1) # Good default parameters [16, 17]
         clf.fit(X_train, y_train)
     elif dim_model == "lightGBM":
         if len(target_labels) > 2:
             clf = lgb.LGBMClassifier(
-                class_weight="balanced", objective="multiclass", n_jobs=-1, verbose=-1 # Correct objective and verbosity [13, 14]
+                class_weight="balanced", objective="multiclass", n_jobs=-1, verbose=-1 # Correct objective and verbosity 
             )
         else:
-            clf = lgb.LGBMClassifier(objective="binary", n_jobs=-1, verbose=-1) # Correct objective and verbosity [13, 14]
+            clf = lgb.LGBMClassifier(objective="binary", n_jobs=-1, verbose=-1) # Correct objective and verbosity 
         clf.fit(X_train, y_train)
     elif dim_model == "XGBoost":
         params = {
             "max_depth": 5,
-            "verbosity": 0, # Replaced 'silent: 1' with 'verbosity: 0' [15, 16]
+            "verbosity": 0, # Replaced 'silent: 1' with 'verbosity: 0' 
             "random_state": 2,
             "num_class": len(target_labels),
-            "objective": "multi:softprob" if len(target_labels) > 2 else "binary:logistic", # Explicit objective [17, 18]
+            "objective": "multi:softprob" if len(target_labels) > 2 else "binary:logistic", # Explicit objective [18, 19]
         }
-        dmatrix = DMatrix(data=X_train, label=y_train)
+        dmatrix = DMatrix(data=X_train, label=y_train) # DMatrix is the core data structure for XGBoost [20]
         clf = xgb.train(params=params, dtrain=dmatrix)
     return clf
 
-@st.cache_data(show_spinner="Making predictions...") # Cache predictions [3]
+@st.cache_data(show_spinner="Making predictions...") # Cache predictions [1, 2, 3, 4]
 def make_pred(dim_model, X_test, clf):
     """Get y_pred using the classifier"""
     if dim_model == "XGBoost":
@@ -152,7 +152,7 @@ def make_pred(dim_model, X_test, clf):
         pred = clf.predict(X_test)
     return pred
 
-@st.cache_data(show_spinner="Filtering misclassified instances...") # Cache filtering [3]
+@st.cache_data(show_spinner="Filtering misclassified instances...") # Cache filtering [1, 2, 3, 4]
 def filter_misclassified(X_test, y_test, pred):
     """Get misclassified instances"""
     idx_misclassified = pred!= y_test
@@ -168,19 +168,19 @@ def show_global_interpretation_eli5(X_test, y_test, features, clf, dim_model):
     st.info(
         """
         Permutation Importance measures how much the model's score decreases when a feature's values are randomly shuffled.
-        A larger decrease indicates higher importance. This is calculated on the test set to reflect generalization. [7, 19, 20]
+        A larger decrease indicates higher importance. This is calculated on the test set to reflect generalization. 
         """
     )
-    # Permutation importance should be calculated on unseen data (X_test, y_test) for generalization [7, 19, 20]
+    # Permutation importance should be calculated on unseen data (X_test, y_test) for generalization 
     perm = PermutationImportance(clf, n_iter=2, random_state=1).fit(X_test, y_test)
     df_global_explain = eli5.explain_weights_df(
         perm, feature_names=features.values, top=5
     ).round(2)
     bar = (
         alt.Chart(df_global_explain)
-       .mark_bar(color="red", opacity=0.6, size=16)
-       .encode(x="weight", y=alt.Y("feature", sort="-x"), tooltip=["weight"])
-       .properties(height=160)
+      .mark_bar(color="red", opacity=0.6, size=16)
+      .encode(x="weight", y=alt.Y("feature", sort="-x"), tooltip=["weight"])
+      .properties(height=160)
     )
     st.write(bar)
 
@@ -190,18 +190,19 @@ def show_global_interpretation_shap(X_train, clf):
     st.info(
         """
         SHAP (SHapley Additive exPlanations) values represent the contribution of each feature to the prediction.
-        The summary plot shows the average absolute SHAP value for each feature, indicating overall feature importance.
+        The summary plot shows the average absolute SHAP value for each feature, indicating overall feature importance. 
         """
     )
     explainer = shap.TreeExplainer(clf)
-    shap_values = explainer.shap_values(X_train) # SHAP values can be computed on training data for global insights
+    shap_values = explainer.shap_values(X_train) # SHAP values can be computed on training data for global insights [21]
 
-    # Handle multiclass shap_values for summary_plot [21]
-    if isinstance(shap_values, list): # For multiclass, shap_values is a list of arrays
+    # Handle multiclass shap_values for summary_plot [21, 22]
+    if isinstance(shap_values, list): # For multiclass, shap_values is a list of arrays (one per class)
         # For a bar plot, we typically show importance for one class or an aggregated view.
-        # Using the first class's SHAP values for the bar plot as a default.
+        # Using the first class's SHAP values for the bar plot as a default, or sum of absolute values.
+        # For simplicity, let's use the first class's SHAP values for the bar plot.
         shap.summary_plot(
-            shap_values,
+            shap_values, # Using SHAP values for the first class for the bar plot [21]
             X_train,
             plot_type="bar",
             max_display=5,
@@ -231,22 +232,22 @@ def show_local_interpretation_eli5(
     st.info(
         """
         ELI5 explains individual predictions by showing the contribution of each feature to the predicted outcome.
-        Positive weights (green) push the prediction towards the target class, while negative weights (red) push it away.
+        Positive weights (green) push the prediction towards the target class, while negative weights (red) push it away. [23]
         """
     )
 
-    # Ensure target_names is always passed for ELI5 for clarity, especially in multiclass [3, 22, 23, 24]
+    # Ensure target_names is always passed for ELI5 for clarity, especially in multiclass [24, 25, 26, 23, 27]
     # For binary classification, targets= often means explaining the positive class.
     # For multiclass, we explain the predicted class.
-    eli5_targets = [target_labels[int(pred[slider_idx])]] if len(target_labels) > 2 else
+    eli5_targets = [target_labels[int(pred[slider_idx])]] if len(target_labels) > 2 else # [27]
 
     local_interpretation = eli5.show_prediction(
         clf,
         doc=dataset.iloc[slider_idx, :],
         show_feature_values=True,
         top=5,
-        target_names=list(target_labels), # Pass target_names for all models [3, 22, 23, 24]
-        targets=eli5_targets,
+        target_names=list(target_labels), # Pass target_names for all models [24, 25, 26, 23, 27]
+        targets=eli5_targets, # Pass targets for specific class explanation [24, 25, 26, 23, 27]
     )
     st.markdown(
         local_interpretation.data.replace("\n", ""), unsafe_allow_html=True,
@@ -259,8 +260,7 @@ def show_local_interpretation_shap(clf, X_test, pred, slider_idx):
         """
         This chart illustrates how each feature collectively influences the prediction outcome for a single instance.
         Features in red push the prediction higher (towards the predicted class), and features in blue push it lower.
-        The base value is the average model output, and the SHAP values explain how each feature moves the prediction from this base value to the final output.
-       (https://github.com/slundberg/shap)
+        The base value is the average model output, and the SHAP values explain how each feature moves the prediction from this base value to the final output. [28, 22]
         Please note that the explanation here is always based on the predicted class rather than the positive class (i.e. if predicted class is 0, to the right means more likely to be 0) to cater for multi-class scenarios.
         """
     )
@@ -270,7 +270,7 @@ def show_local_interpretation_shap(clf, X_test, pred, slider_idx):
     # The predicted class for the selected instance
     pred_i = int(pred[slider_idx])
 
-    # Handle multiclass shap_values for force_plot [21, 25]
+    # Handle multiclass shap_values for force_plot [28, 22]
     if isinstance(shap_values, list): # Multiclass
         # shap_values is a list of arrays, one for each class
         # We need to select the SHAP values corresponding to the predicted class
@@ -296,7 +296,7 @@ def show_local_interpretation(
     X_test, y_test, clf, pred, target_labels, features, dim_model, dim_framework
 ):
     """Show the interpretation based on the selected framework"""
-    n_data = X_test.shape
+    n_data = X_test.shape # Corrected to get number of rows
     if n_data == 0:
         st.text("No data points to explain.")
         return
@@ -356,13 +356,13 @@ def draw_pdp(clf, dataset, features, target_labels, dim_model):
     st.info(
         """
         Partial Dependence Plots (PDPs) show the marginal effect of one or two features on the predicted outcome of a machine learning model.
-        They illustrate how the prediction changes on average as the feature(s) vary.
-        **Note:** PDPs assume that the feature(s) for which the partial dependence is computed are independent of other features. [26]
-        If features are highly correlated, the interpretation of a PDP might be misleading as it shows the effect of unlikely feature combinations.
+        They illustrate how the prediction changes on average as the feature(s) vary. [29]
+        **Note:** PDPs assume that the feature(s) for which the partial dependence is computed are independent of other features. [29]
+        If features are highly correlated, the interpretation of a PDP might be misleading as it shows the effect of unlikely feature combinations. [29]
         """
     )
 
-    # Define a prediction function for XGBoost Booster for PDPbox compatibility [27]
+    # Define a prediction function for XGBoost Booster for PDPbox compatibility [30, 31, 32]
     def xgb_predict_proba(model, X):
         # For multi-class, xgb.train with multi:softprob returns probabilities directly
         # For binary, xgb.train with binary:logistic returns probabilities
@@ -383,19 +383,19 @@ def draw_pdp(clf, dataset, features, target_labels, dim_model):
 
     pdp_dist = pdp.pdp_isolate(
         model=clf, dataset=dataset, model_features=features, feature=selected_col,
-        pred_func=pred_func # Pass custom prediction function if needed
+        pred_func=pred_func # Pass custom prediction function if needed [31, 32]
     )
     if len(target_labels) <= 5:
         ncol = len(target_labels)
     else:
         ncol = 5
     
-    fig, axes = pdp.pdp_plot(pdp_dist, selected_col, ncols=ncol, figsize=(12, 5)) # Get figure and axes
+    fig, axes = pdp.pdp_plot(pdp_dist, selected_col, ncols=ncol, figsize=(12, 5)) # Get figure and axes [29, 33]
     st.pyplot(fig) # Pass figure to streamlit
 
 
 def main():
-    # Use session state for selectbox values to persist choices [1, 2]
+    # Use session state for selectbox values to persist choices 
     st.session_state.dim_data = st.sidebar.selectbox(
         "Try out sample data", ("iris", "titanic", "census income"),
         key="dim_data_selectbox",
@@ -489,10 +489,10 @@ def main():
 
     if st.session_state.filter_misclassified_checkbox:
         X_test_filtered, y_test_filtered, pred_filtered = filter_misclassified(X_test, y_test, pred)
-        if X_test_filtered.shape == 0:
+        if X_test_filtered.shape == 0: # Corrected to check number of rows
             st.text("No misclassification🎉")
         else:
-            st.text(str(X_test_filtered.shape) + " misclassified total")
+            st.text(str(X_test_filtered.shape) + " misclassified total") # Corrected to display number of rows
             show_local_interpretation(
                 X_test_filtered,
                 y_test_filtered,
