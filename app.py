@@ -220,7 +220,7 @@ def show_local_interpretation(
 ):
     """show the interpretation based on the selected framework"""
     n_data = X_test.shape[0]
-    slider_idx = st.slider("Which datapoint to explain", 0, n_data - 1)
+slider_idx = st.slider("Select test sample index", 0, len(X_test) - 1, 0)
 
     st.text(
         "Prediction: "
