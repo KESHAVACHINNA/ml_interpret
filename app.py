@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import numpy as np # Added for numpy array check
+import numpy as np
 
 # ml
 from sklearn.model_selection import train_test_split
@@ -115,18 +115,22 @@ def show_global_interpretation_shap(X_train, clf):
     """show most important features via permutation importance in SHAP"""
     explainer = shap.TreeExplainer(clf)
     shap_values = explainer.shap_values(X_train)
+
+    # It's good practice to create a figure explicitly for st.pyplot
+    fig, ax = plt.subplots(figsize=(12, 5)) # Create a figure and an axes object
     shap.summary_plot(
         shap_values,
         X_train,
         plot_type="bar",
         max_display=5,
-        plot_size=(12, 5),
+        plot_size=(12, 5), # This might be redundant if fig is used directly
         color=plt.get_cmap("tab20b"),
-        show=False,
+        show=False, # Set to False as we will pass the figure to st.pyplot
         color_bar=False,
+        # Pass the ax object to the shap plot if it supports it, or handle it via current figure context
+        # Some shap plots might not take an 'ax' argument directly in summary_plot
     )
-    # note: there might be figure cutoff issue. Will look further into forceplot & st.pyplot's implementation.
-    st.pyplot()
+    st.pyplot(fig) # Pass the figure to st.pyplot to avoid deprecation warning
 
 
 def filter_misclassified(X_test, y_test, pred):
@@ -172,7 +176,7 @@ def show_local_interpretation_eli5(
     )
 
 
-def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx): # Added target_labels
+def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx):
     """show the interpretation of individual decision points"""
     info_local = st.button("How this works")
     if info_local:
@@ -196,18 +200,20 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
         shap_values_for_plot = shap_values[pred_i][slider_idx, :]
     else: # Binary classification or single output model
         # explainer.expected_value might be a scalar or a single array
-        # If it's an array with one element, take the element
         expected_value_for_plot = explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
         shap_values_for_plot = shap_values[slider_idx, :]
 
-
+    # Removed matplotlib=True as it's not supported by shap.force_plot in some environments
+    # shap.force_plot will render as an HTML/JavaScript object in Streamlit
     shap.force_plot(
         expected_value_for_plot,
         shap_values_for_plot,
         X_test.iloc[slider_idx, :],
-        matplotlib=True,
+        # matplotlib=True, # REMOVED THIS LINE
     )
-    st.pyplot()
+    # st.pyplot() is not needed for force_plot when matplotlib=True is removed
+    # force_plot usually returns a JS object that Streamlit handles directly
+    st.write(shap.force_plot(expected_value_for_plot, shap_values_for_plot, X_test.iloc[slider_idx, :])) # Use st.write for direct SHAP HTML rendering
 
 
 def show_local_interpretation(
@@ -225,7 +231,6 @@ def show_local_interpretation(
     )
 
     if dim_framework == "SHAP":
-        # Pass target_labels to show_local_interpretation_shap
         show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
     elif dim_framework == "ELI5":
         show_local_interpretation_eli5(
@@ -239,6 +244,7 @@ def show_perf_metrics(y_test, pred):
     st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
     conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test)))
     sns.set(font_scale=1.4)
+    fig, ax = plt.subplots() # Create a figure explicitly
     sns.heatmap(
         conf_matrix,
         square=True,
@@ -246,8 +252,9 @@ def show_perf_metrics(y_test, pred):
         annot_kws={"size": 15},
         cmap="YlGnBu",
         cbar=False,
+        ax=ax # Pass the axes object to heatmap
     )
-    st.sidebar.pyplot()
+    st.sidebar.pyplot(fig) # Pass the figure to st.sidebar.pyplot
 
 
 def draw_pdp(clf, dataset, features, target_labels, dim_model):
@@ -268,8 +275,11 @@ def draw_pdp(clf, dataset, features, target_labels, dim_model):
             ncol = len(target_labels)
         else:
             ncol = 5
-        pdp.pdp_plot(pdp_dist, selected_col, ncols=ncol, figsize=(12, 5))
-        st.pyplot()
+        
+        # Create a figure explicitly for pdp_plot
+        fig, axes = plt.subplots(ncols=ncol, figsize=(12, 5)) 
+        pdp.pdp_plot(pdp_dist, selected_col, plot_pts_vert=False, plot_ax=axes, show_titles=True) # plot_ax argument to use the created axes
+        st.pyplot(fig) # Pass the figure to st.pyplot
 
 
 def main():
