@@ -5,6 +5,7 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.datasets import make_classification
+import numpy as np # Import numpy
 
 # --- Function for Global SHAP Interpretation ---
 def show_global_interpretation_shap(X_data, model):
@@ -25,33 +26,34 @@ def show_global_interpretation_shap(X_data, model):
         X_data_df = X_data
 
     # Initialize SHAP explainer
-    # For tree models, TreeExplainer is more efficient. For others, use Explainer.
+    # Use try-except to handle different explainer types and their output formats
     try:
         explainer = shap.TreeExplainer(model)
-        # For tree models, explainer.shap_values can sometimes return a list of arrays for multi-output
-        # We need to handle this for classification models if they return shap values per class.
-        # For binary classification, we often focus on shap_values[1] (for the positive class).
-        shap_values = explainer.shap_values(X_data_df)
-        if isinstance(shap_values, list) and len(shap_values) > 1:
-            # Assuming binary classification, taking SHAP values for the positive class (index 1)
-            # You might need to adjust this based on your specific model's output
-            shap_values = shap_values[1]
+        # For TreeExplainer, shap_values might be a list (for multi-output) or a single array
+        raw_shap_values = explainer.shap_values(X_data_df)
+
+        if isinstance(raw_shap_values, list) and len(raw_shap_values) > 1:
+            # For classification, often focus on the SHAP values for the positive class (index 1)
+            # Adjust this index if your positive class is at a different index or for multi-class
+            shap_values_to_plot = raw_shap_values[1]
+        else:
+            shap_values_to_plot = raw_shap_values
+
     except Exception:
         # Fallback to general Explainer for non-tree models or if TreeExplainer fails
         explainer = shap.Explainer(model, X_data_df)
-        shap_values = explainer(X_data_df)
-        # If explainer(X_data_df) returns a shap.Explanation object, get its values
-        if hasattr(shap_values, 'values'):
-            shap_values = shap_values.values
+        shap_explanation = explainer(X_data_df) # This returns a shap.Explanation object
+        shap_values_to_plot = shap_explanation.values # Extract the values array
 
-
-    # Create a Matplotlib figure
+    # Create a Matplotlib figure and axes for the plot
     fig, ax = plt.subplots(figsize=(10, 6))
 
     # Generate the SHAP summary bar plot
+    # Pass feature_names if X_data_df is not used directly in shap_values
     shap.summary_plot(
-        shap_values,
-        X_data_df, # Pass the DataFrame here for proper feature naming
+        shap_values_to_plot,
+        features=X_data_df, # Pass the DataFrame here for proper feature naming
+        feature_names=X_data_df.columns.tolist(), # Explicitly pass feature names
         plot_type="bar",
         max_display=10, # Display top 10 features
         show=False,     # Don't show the plot immediately (Streamlit handles it)
@@ -65,6 +67,73 @@ def show_global_interpretation_shap(X_data, model):
 
     # Display the plot in Streamlit
     st.pyplot(fig)
+    plt.close(fig) # Close the figure to free up memory
+
+# --- Function for Local SHAP Interpretation ---
+def show_local_interpretation_shap(X_data, model, explainer, instance_index):
+    st.subheader(f"Local Feature Importance (SHAP Waterfall Plot for Instance {instance_index})")
+
+    if X_data.empty:
+        st.warning("No data available for local interpretation.")
+        return
+
+    single_instance = X_data.iloc[[instance_index]]
+    
+    # Calculate SHAP values for the selected instance
+    # This will return a shap.Explanation object or a list of Explanation objects
+    shap_explanation_instance = explainer(single_instance)
+
+    st.write(f"**Selected Instance Data:**")
+    st.dataframe(single_instance)
+
+    # Determine the predicted class/value for display
+    try:
+        prediction = model.predict(single_instance)[0]
+        if hasattr(model, 'predict_proba'): # For classification models
+            probabilities = model.predict_proba(single_instance)[0]
+            st.write(f"Predicted Class: **{prediction}** (Probability: {probabilities[prediction]:.2f})")
+        else: # For regression models
+            st.write(f"Predicted Value: **{prediction:.2f}**")
+    except Exception as e:
+        st.warning(f"Could not get model prediction: {e}")
+        prediction = None # Set to None if prediction fails
+
+    # SHAP waterfall plot often creates its own figure, so we might not need to pass an 'ax'
+    # It's better to let shap.plots.waterfall manage its figure directly
+    # and then capture it via plt.gcf() if you need to pass it to st.pyplot.
+
+    if isinstance(shap_explanation_instance, list) and len(shap_explanation_instance) > 1:
+        # For multi-output (e.g., multi-class classification), select the explanation for the predicted class
+        if prediction is not None:
+            # Access the Explanation object for the predicted class
+            explanation_for_plot = shap_explanation_instance[prediction]
+            fig_ind = shap.plots.waterfall(explanation_for_plot, show=False)
+        else:
+            st.error("Cannot plot waterfall without a valid prediction for multi-output model.")
+            return # Exit if prediction failed for multi-output
+    elif isinstance(shap_explanation_instance, shap.Explanation):
+        # For single output or if explainer returns a single Explanation object
+        # Ensure we're passing a single Explanation object (e.g., the first row if multiple instances were passed)
+        fig_ind = shap.plots.waterfall(shap_explanation_instance[0], show=False)
+    else:
+        st.error("Unsupported SHAP explanation format for waterfall plot.")
+        return
+
+    if fig_ind: # Only proceed if a figure was generated
+        plt.tight_layout()
+        st.pyplot(fig_ind)
+        plt.close(fig_ind) # Close the figure to free up memory
+
+    st.markdown("""
+    ---
+    **How to interpret the Waterfall Plot:**
+    * **Base Value (E[f(X)])**: The average model output over the background dataset.
+    * **Features (e.g., Feature_X = Value)**: Each bar shows the contribution of that feature's value to push the prediction from the base value to the final output.
+    * **Red Bars**: Indicate features that push the prediction higher.
+    * **Blue Bars**: Indicate features that push the prediction lower.
+    * **f(x)**: The final model output for this specific instance.
+    """)
+
 
 # --- Main Streamlit Application ---
 def main():
@@ -76,15 +145,15 @@ def main():
     st.sidebar.header("Model and Data Settings")
 
     # --- Generate Sample Data ---
-    num_samples = st.sidebar.slider("Number of samples", 100, 1000, 500)
-    num_features = st.sidebar.slider("Number of features", 5, 20, 10)
-    random_state = st.sidebar.slider("Random State for Data Generation", 0, 100, 42)
+    num_samples = st.sidebar.slider("Number of samples", 100, 1000, 500, key='num_samples_slider')
+    num_features = st.sidebar.slider("Number of features", 5, 20, 10, key='num_features_slider')
+    random_state = st.sidebar.slider("Random State for Data Generation", 0, 100, 42, key='random_state_slider')
 
     X, y = make_classification(
         n_samples=num_samples,
         n_features=num_features,
-        n_informative=int(num_features * 0.7), # About 70% informative features
-        n_redundant=int(num_features * 0.2),   # About 20% redundant features
+        n_informative=int(num_features * 0.7),
+        n_redundant=int(num_features * 0.2),
         n_clusters_per_class=1,
         random_state=random_state
     )
@@ -96,30 +165,40 @@ def main():
 
     st.sidebar.markdown("---")
     st.sidebar.header("Model Training")
-    if st.sidebar.button("Train Random Forest Model"):
+    
+    # Initialize session state for model_trained if not present
+    if 'model_trained' not in st.session_state:
+        st.session_state['model_trained'] = False
+        st.session_state['model'] = None
+        st.session_state['X_df'] = pd.DataFrame()
+        st.session_state['y_series'] = pd.Series()
+        st.session_state['explainer'] = None # Store explainer
+
+    if st.sidebar.button("Train Random Forest Model", key='train_button'):
         st.session_state['model_trained'] = True
         st.session_state['X_df'] = X_df
         st.session_state['y_series'] = y_series
 
         with st.spinner("Training model..."):
-            # Split data (though SHAP typically uses training data for background distribution)
-            # For simplicity, we'll use the whole X_df as X_train for SHAP here
-            # In a real scenario, you'd use X_train for explainer background and X_test for predictions
-            # X_train, X_test, y_train, y_test = train_test_split(X_df, y_series, test_size=0.2, random_state=random_state)
-            
             clf = RandomForestClassifier(n_estimators=100, random_state=random_state, n_jobs=-1)
             clf.fit(X_df, y_series)
             st.session_state['model'] = clf
+
+            # Re-initialize explainer after model training
+            try:
+                st.session_state['explainer'] = shap.TreeExplainer(clf)
+            except Exception:
+                st.session_state['explainer'] = shap.Explainer(clf, X_df) # Pass X_df as background
         st.success("Model trained successfully!")
     else:
-        if 'model_trained' not in st.session_state:
-            st.session_state['model_trained'] = False
+        if not st.session_state['model_trained']:
             st.warning("Click 'Train Random Forest Model' in the sidebar to proceed.")
 
 
-    if st.session_state.get('model_trained', False):
+    if st.session_state.get('model_trained', False) and st.session_state['model'] is not None:
         model = st.session_state['model']
         X_data_for_shap = st.session_state['X_df']
+        explainer = st.session_state['explainer']
 
         st.markdown("---")
         st.header("1. Global Interpretation")
@@ -134,66 +213,11 @@ def main():
                 "Select data instance index",
                 0,
                 len(X_data_for_shap) - 1,
-                0 # Default to the first instance
+                0, # Default to the first instance
+                key='instance_slider'
             )
-
-            # Ensure the explainer is available or re-create it
-            if 'explainer' not in st.session_state:
-                try:
-                    explainer = shap.TreeExplainer(model)
-                except Exception:
-                    explainer = shap.Explainer(model, X_data_for_shap)
-                st.session_state['explainer'] = explainer
-
-            explainer = st.session_state['explainer']
-            single_instance = X_data_for_shap.iloc[[instance_index]]
-
-            # Calculate SHAP values for the selected instance
-            shap_values_instance = explainer(single_instance)
-
-            st.write(f"**Explanation for Instance {instance_index}:**")
-            st.dataframe(single_instance)
-
-            fig_ind, ax_ind = plt.subplots(figsize=(10, 6))
-
-            if isinstance(shap_values_instance, list) and len(shap_values_instance) > 1:
-                # For classification, plot the explanation for the predicted class
-                predicted_class = model.predict(single_instance)[0]
-                st.write(f"Predicted Class: **{predicted_class}**")
-                # Ensure we are using the Explanation object directly from explainer(instance) call
-                # and selecting the correct output index for the predicted class
-                shap.plots.waterfall(
-                    shap_values_instance[predicted_class][0], # [0] because it's a single instance
-                    show=False,
-                    ax=ax_ind
-                )
-            elif hasattr(shap_values_instance, 'values'): # If it's a shap.Explanation object
-                st.write(f"Predicted Value (Raw): **{model.predict(single_instance)[0]}**")
-                shap.plots.waterfall(
-                    shap_values_instance[0], # [0] because it's a single instance
-                    show=False,
-                    ax=ax_ind
-                )
-            else: # Fallback for other shap_values formats
-                st.warning("Could not determine appropriate SHAP plot for this instance's SHAP values format.")
-                # You might need to add more specific handling based on your model's output
-                # For general cases, you might try force_plot or other plots
-                pass
-
-
-            ax_ind.set_title(f"SHAP Waterfall Plot for Instance {instance_index}")
-            plt.tight_layout()
-            st.pyplot(fig_ind)
-
-            st.markdown("""
-            ---
-            **How to interpret the Waterfall Plot:**
-            * **Base Value (E[f(X)])**: The average model output over the training dataset.
-            * **Features (e.g., Feature_X = Value)**: Each bar shows the contribution of that feature's value to push the prediction from the base value to the final output.
-            * **Red Bars**: Push the prediction higher (increase the predicted probability for the positive class).
-            * **Blue Bars**: Push the prediction lower (decrease the predicted probability for the positive class).
-            * **f(x)**: The final model output for this specific instance.
-            """)
+            
+            show_local_interpretation_shap(X_data_for_shap, model, explainer, instance_index)
         else:
             st.info("No data available for local interpretation. Please train a model first.")
 
