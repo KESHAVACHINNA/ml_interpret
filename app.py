@@ -9,7 +9,8 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, confusion_matrix
 import lightgbm as lgb
 import xgboost as xgb
-from xgboost import DMatrix
+# DMatrix is no longer needed for prediction with the wrapper
+# from xgboost import DMatrix 
 
 # plotting
 import matplotlib.pyplot as plt
@@ -62,21 +63,22 @@ def splitdata(X, y):
     X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.80, random_state=0)
     return X_train, X_test, y_train, y_test
 
+# CORRECTED FUNCTION
 def make_pred(dim_model, X_test, clf):
-    if dim_model == "XGBoost":
-        pred = clf.predict(DMatrix(X_test))
-    elif dim_model == "lightGBM":
-        pred = clf.predict(X_test)
-    else:
-        pred = clf.predict(X_test)
+    # No special case needed for XGBoost anymore, as the wrapper has a .predict method
+    pred = clf.predict(X_test)
     return pred
 
 def show_global_interpretation_eli5(X_train, y_train, features, clf, dim_model):
+    # This function should now work correctly with XGBoost because we are using the scikit-learn wrapper
     if dim_model == "XGBoost":
-        df_global_explain = eli5.explain_weights_df(clf, feature_names=features.tolist(), top=5).round(2)
+        # Using PermutationImportance for consistency and robustness across all models
+        perm = PermutationImportance(clf, n_iter=2, random_state=1).fit(X_train, y_train)
+        df_global_explain = eli5.explain_weights_df(perm, feature_names=features.tolist(), top=5).round(2)
     else:
         perm = PermutationImportance(clf, n_iter=2, random_state=1).fit(X_train, y_train)
         df_global_explain = eli5.explain_weights_df(perm, feature_names=features.tolist(), top=5).round(2)
+        
     bar = (alt.Chart(df_global_explain).mark_bar(color="red", opacity=0.6, size=16)
            .encode(x="weight", y=alt.Y("feature", sort="-x"), tooltip=["weight"]).properties(height=160))
     st.write(bar)
@@ -86,8 +88,9 @@ def show_global_interpretation_shap(X_train, clf):
     shap_values = explainer.shap_values(X_train)
     fig, ax = plt.subplots(figsize=(12, 5))
     shap.summary_plot(shap_values, X_train, plot_type="bar", max_display=5, 
-                     color=plt.get_cmap("tab20b"), show=False, color_bar=False, plot_component=0, ax=ax)
+                     color=plt.get_cmap("tab20b"), show=False, color_bar=False, ax=ax)
     st.pyplot(fig)
+
 
 def filter_misclassified(X_test, y_test, pred):
     idx_misclassified = pred != y_test
@@ -99,19 +102,16 @@ def filter_misclassified(X_test, y_test, pred):
 def show_local_interpretation_eli5(dataset, clf, pred, target_labels, features, dim_model, slider_idx):
     info_local = st.button("How this works")
     if info_local:
-        st.info("""**What's included** Input data is split 80/20 into training and testing. 
-        Each of the individual testing datapoint can be inspected by index.
-        **To Read the table** The table describes how an individual datapoint is classified.
-        Contribution refers to the extent & direction of influence a feature has on the outcome
+        st.info("""**What's included** Input data is split 80/20 into training and testing. <br>
+        Each of the individual testing datapoint can be inspected by index.<br>
+        **To Read the table** The table describes how an individual datapoint is classified.<br>
+        Contribution refers to the extent & direction of influence a feature has on the outcome<br>
         Value refers to the value of the feature in the dataset. Bias means an intercept.""")
 
-    if dim_model == "XGBoost":
-        local_interpretation = eli5.show_prediction(clf, doc=dataset.iloc[slider_idx, :], 
-                                                   show_feature_values=True, top=5)
-    else:
-        local_interpretation = eli5.show_prediction(clf, doc=dataset.iloc[slider_idx, :],
-                                                   target_names=target_labels.tolist(), 
-                                                   show_feature_values=True, top=5, targets=[True])
+    # This function should now work correctly with XGBoost because we are using the scikit-learn wrapper
+    local_interpretation = eli5.show_prediction(clf, doc=dataset.iloc[slider_idx, :],
+                                               target_names=target_labels.tolist(), 
+                                               show_feature_values=True, top=5, targets=[True])
     st.markdown(local_interpretation.data.replace("\n", ""), unsafe_allow_html=True)
 
 def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx):
@@ -125,10 +125,10 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
     shap_values = explainer.shap_values(X_test)
     pred_i = int(pred[slider_idx])
 
-    if isinstance(shap_values, list):
+    if isinstance(shap_values, list): # For multi-class classification
         shap_values_for_plot = shap_values[pred_i][slider_idx]
         expected_value_for_plot = explainer.expected_value[pred_i]
-    else:
+    else: # For binary classification
         shap_values_for_plot = shap_values[slider_idx]
         expected_value_for_plot = explainer.expected_value
 
@@ -161,7 +161,8 @@ def show_perf_metrics(y_test, pred):
     st.sidebar.pyplot(fig)
 
 def draw_pdp(clf, dataset, features, target_labels, dim_model):
-    if dim_model != "XGBoost":
+    # This condition is no longer strictly necessary but can be kept for consistency
+    if dim_model != "XGBoost_native": # Or just remove the condition entirely
         selected_col = st.selectbox("Select a feature", features)
         st.info("""**To read the chart:** The curves describe how a feature marginally varies with 
         the likelihood of outcome. Each subplot belong to a class outcome. When a curve is below 0, 
@@ -189,10 +190,14 @@ def main():
         else:
             clf = lgb.LGBMClassifier(objective="binary", n_jobs=-1, verbose=-1)
         clf.fit(X_train, y_train)
+    
+    # CORRECTED BLOCK
     elif dim_model == "XGBoost":
-        params = {"max_depth": 5, "silent": 1, "random_state": 2, "num_class": len(target_labels)}
-        dmatrix = DMatrix(data=X_train, label=y_train)
-        clf = xgb.train(params=params, dtrain=dmatrix)
+        # Use the scikit-learn wrapper: XGBClassifier for ELI5 compatibility
+        clf = xgb.XGBClassifier(use_label_encoder=False, 
+                                eval_metric='mlogloss', 
+                                random_state=2)
+        clf.fit(X_train, y_train)
 
     pred = make_pred(dim_model, X_test, clf)
     dim_framework = st.sidebar.radio("Choose interpretation framework", ["SHAP", "ELI5"])
@@ -226,7 +231,8 @@ def main():
     else:
         show_local_interpretation(X_test, y_test, clf, pred, target_labels, features, dim_model, dim_framework)
 
-    if dim_model != "XGBoost" and st.checkbox("Show how features vary with outcome"):
+    # The PDP plot condition can be simplified since all models now have the same interface
+    if st.checkbox("Show how features vary with outcome"):
         draw_pdp(clf, X_train, features, target_labels, dim_model)
 
 if __name__ == "__main__":
