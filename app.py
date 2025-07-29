@@ -371,48 +371,4 @@ def main():
             """
             Read more about how it works on [Github] (https://github.com/yanhann10/ml_interpret)
             Basic data cleaning recommended before upload 
-            [Feedback](https://docs.google.com/forms/d/e/1FAIpQLSdTXKpMPC0-TmWf2ngU9A0sokH5Z0m-QazSPBIZyZ2AbXIBug/viewform?usp=sf_link) 
-            Last update Mar 2020 by [@hannahyan](https://twitter.com/hannahyan)
-            """
-        )
-        st.sidebar.markdown(
-            '<a href="https://ctt.ac/zu8S4"><img src="https://image.flaticon.com/icons/svg/733/733579.svg" width=16></a>',
-            unsafe_allow_html=True,
-        )
-
-    ################################################
-    # Local Interpretation
-    ################################################
-    st.markdown("#### Local Interpretation")
-
-    # misclassified
-    if st.checkbox("Filter for misclassified"):
-        X_test, y_test, pred = filter_misclassified(X_test, y_test, pred)
-        if X_test.shape[0] == 0:
-            st.text("No misclassification🎉")
-        else:
-            st.text(str(X_test.shape[0]) + " misclassified total")
-            show_local_interpretation(
-                X_test,
-                y_test,
-                clf,
-                pred,
-                target_labels,
-                features,
-                dim_model,
-                dim_framework,
-            )
-    else:
-        show_local_interpretation(
-            X_test, y_test, clf, pred, target_labels, features, dim_model, dim_framework
-        )
-
-    ################################################
-    # PDP plot
-    ################################################
-    if dim_model != "XGBoost" and st.checkbox("Show how features vary with outcome"):
-        draw_pdp(clf, X_train, features, target_labels, dim_model)
-
-
-if __name__ == "__main__":
-    main()
+            [Feedback](
