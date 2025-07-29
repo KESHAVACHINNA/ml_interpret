@@ -2,95 +2,63 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import shap
-import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_iris
 
-st.set_option('deprecation.showPyplotGlobalUse', False)
+st.set_page_config(layout="wide")
 
-
+@st.cache_data
 def load_data():
-    st.sidebar.subheader("Upload Dataset")
-    uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
-    if uploaded_file:
-        data = pd.read_csv(uploaded_file)
-        st.write("### Preview of Dataset:")
-        st.write(data.head())
-        return data
-    else:
-        st.info("Awaiting for CSV file to be uploaded.")
-        return None
+    data = load_iris()
+    X = pd.DataFrame(data.data, columns=data.feature_names)
+    y = pd.Series(data.target)
+    return X, y, data.target_names
 
-
-def build_model(X_train, y_train):
-    clf = RandomForestClassifier()
+def train_model(X, y):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
+    clf = RandomForestClassifier(random_state=42)
     clf.fit(X_train, y_train)
-    return clf
-
+    pred = clf.predict(X_test)
+    return clf, X_train, X_test, y_train, y_test, pred
 
 def show_perf_metrics(y_test, pred):
     report = classification_report(y_test, pred, output_dict=True)
     st.sidebar.subheader("Classification Report")
-    st.sidebar.dataframe(pd.DataFrame(report).round(2).transpose())
-
-    conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test)))
-    sns.set(font_scale=1.2)
+    st.sidebar.dataframe(pd.DataFrame(report).transpose().round(2))
+    
+    labels = sorted(list(set(y_test)))
+    conf_matrix = confusion_matrix(y_test, pred, labels=labels)
     plt.figure(figsize=(6, 4))
-    sns.heatmap(
-        conf_matrix,
-        square=True,
-        annot=True,
-        annot_kws={"size": 12},
-        cmap="YlGnBu",
-        cbar=False,
-        fmt='d'
-    )
-    plt.xlabel("Predicted")
-    plt.ylabel("Actual")
-    st.sidebar.subheader("Confusion Matrix")
-    st.sidebar.pyplot()
-
+    sns.set(font_scale=1.2)
+    sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='YlGnBu', xticklabels=labels, yticklabels=labels)
+    plt.title("Confusion Matrix")
+    st.sidebar.pyplot(plt)
 
 def show_global_interpretation_shap(X_train, clf):
-    st.subheader("Global Interpretation using SHAP")
     explainer = shap.TreeExplainer(clf)
     shap_values = explainer.shap_values(X_train)
 
-    if isinstance(shap_values, list):  # multiclass
-        for i, class_shap_values in enumerate(shap_values):
-            st.write(f"SHAP Summary Plot for Class {i}")
-            shap.summary_plot(class_shap_values, X_train, plot_type="bar", show=False)
-            st.pyplot()
-    else:  # binary or regression
-        st.write("SHAP Summary Plot")
-        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
-        st.pyplot()
-
+    st.subheader("SHAP Summary Plot")
+    for i in range(len(shap_values)):
+        st.markdown(f"**Class {i}**")
+        fig, ax = plt.subplots()
+        shap.summary_plot(shap_values[i], X_train, plot_type="bar", show=False)
+        st.pyplot(fig)
 
 def main():
-    st.title("BlackBox ML Classifiers Visually Explained")
-    st.markdown("A Streamlit app to interpret machine learning classifiers using SHAP.")
+    st.title("🔍 ML Interpretability App")
+    st.markdown("Explains model predictions using SHAP and performance metrics.")
 
-    data = load_data()
-    if data is not None:
-        if st.sidebar.checkbox("Run Model and Explain", value=True):
-            target_column = st.sidebar.selectbox("Select Target Column", data.columns)
+    X, y, class_names = load_data()
+    clf, X_train, X_test, y_train, y_test, pred = train_model(X, y)
 
-            X = data.drop(columns=[target_column])
-            y = data[target_column]
+    show_perf_metrics(y_test, pred)
+    show_global_interpretation_shap(X_train, clf)
 
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
-            )
-
-            clf = build_model(X_train, y_train)
-            pred = clf.predict(X_test)
-
-            show_perf_metrics(y_test, pred)
-            show_global_interpretation_shap(X_train, clf)
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
