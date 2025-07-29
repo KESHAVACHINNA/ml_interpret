@@ -1,11 +1,11 @@
 streamlit
+pandas
 scikit-learn
 matplotlib
 seaborn
+altair
+eli5
+shap
 xgboost
 lightgbm
-shap
-eli5
-pandas
-numpy
-joblib
+pdpbox
