@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np # Added for numpy array check
 
 # ml
 from sklearn.model_selection import train_test_split
@@ -23,7 +24,7 @@ import shap
 
 # Title and Subheader
 st.title("ML Interpreter")
-st.subheader("Blackblox ML classifiers visually explained")
+st.subheader("Blackbox ML classifiers visually explained")
 
 
 def upload_data(uploaded_file, dim_data):
@@ -171,7 +172,7 @@ def show_local_interpretation_eli5(
     )
 
 
-def show_local_interpretation_shap(clf, X_test, pred, slider_idx):
+def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx): # Added target_labels
     """show the interpretation of individual decision points"""
     info_local = st.button("How this works")
     if info_local:
@@ -184,12 +185,25 @@ def show_local_interpretation_shap(clf, X_test, pred, slider_idx):
         )
     explainer = shap.TreeExplainer(clf)
     shap_values = explainer.shap_values(X_test)
-    # the predicted class for the selected instance
+
     pred_i = int(pred[slider_idx])
-    # this illustrates why the model predict this particular outcome
+
+    # Determine if it's a multi-class or binary classification for SHAP values
+    # Check if shap_values is a list (typical for multi-class) and if there are more than 2 target labels
+    if isinstance(shap_values, list) and len(target_labels) > 2: # Multi-class
+        # explainer.expected_value will be an array
+        expected_value_for_plot = explainer.expected_value[pred_i]
+        shap_values_for_plot = shap_values[pred_i][slider_idx, :]
+    else: # Binary classification or single output model
+        # explainer.expected_value might be a scalar or a single array
+        # If it's an array with one element, take the element
+        expected_value_for_plot = explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
+        shap_values_for_plot = shap_values[slider_idx, :]
+
+
     shap.force_plot(
-        explainer.expected_value[pred_i],
-        shap_values[pred_i][slider_idx, :],
+        expected_value_for_plot,
+        shap_values_for_plot,
         X_test.iloc[slider_idx, :],
         matplotlib=True,
     )
@@ -211,7 +225,8 @@ def show_local_interpretation(
     )
 
     if dim_framework == "SHAP":
-        show_local_interpretation_shap(clf, X_test, pred, slider_idx)
+        # Pass target_labels to show_local_interpretation_shap
+        show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
     elif dim_framework == "ELI5":
         show_local_interpretation_eli5(
             X_test, clf, pred, target_labels, features, dim_model, slider_idx
