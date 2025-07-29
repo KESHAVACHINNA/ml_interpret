@@ -23,8 +23,8 @@ from pdpbox import pdp
 import shap
 
 # Title and Subheader
-st.title("ML Interpreter") [cite: 16]
-st.subheader("Blackbox ML classifiers visually explained") [cite: 17]
+st.title("ML Interpreter")
+st.subheader("Blackbox ML classifiers visually explained")
 
 
 def upload_data(uploaded_file, dim_data):
@@ -41,7 +41,7 @@ def upload_data(uploaded_file, dim_data):
             "Then choose the target variable", col_arranged
         )
         X, y, features, target_labels = encode_data(df, target_col)
-    elif dim_data == "iris": [cite: 2]
+    elif dim_data == "iris":
         df = sns.load_dataset("iris")
         target_col = "species"
         X, y, features, target_labels = encode_data(df, target_col)
@@ -80,7 +80,7 @@ def splitdata(X, y):
 
 def make_pred(dim_model, X_test, clf):
     """get y_pred using the classifier"""
-    if dim_model == "XGBoost": [cite: 8]
+    if dim_model == "XGBoost":
         pred = clf.predict(DMatrix(X_test))
     elif dim_model == "lightGBM":
         pred = clf.predict(X_test)
@@ -116,7 +116,6 @@ def show_global_interpretation_shap(X_train, clf):
     explainer = shap.TreeExplainer(clf)
     shap_values = explainer.shap_values(X_train)
 
-    # Create a Matplotlib figure explicitly for SHAP summary_plot
     fig, ax = plt.subplots(figsize=(12, 5))
     shap.summary_plot(
         shap_values,
@@ -124,12 +123,12 @@ def show_global_interpretation_shap(X_train, clf):
         plot_type="bar",
         max_display=5,
         color=plt.get_cmap("tab20b"),
-        show=False, # Important: Set to False so shap doesn't try to show it globally
+        show=False,
         color_bar=False,
-        plot_component=0, # Added this to handle potential multi-output shap_values more gracefully for simple bar plots
-        ax=ax # Pass the axes object for plotting
+        plot_component=0, # Ensure compatibility with multi-output models for bar plot
+        ax=ax
     )
-    st.pyplot(fig) # Pass the figure to st.pyplot to address deprecation warning
+    st.pyplot(fig)
 
 
 def filter_misclassified(X_test, y_test, pred):
@@ -145,11 +144,11 @@ def show_local_interpretation_eli5(
     dataset, clf, pred, target_labels, features, dim_model, slider_idx
 ):
     """show the interpretation of individual decision points"""
-    info_local = st.button("How this works") [cite: 48]
+    info_local = st.button("How this works")
     if info_local:
         st.info(
             """
-        **What's included** Input data is split 80/20 into training and testing. 
+        **What's included** Input data is split 80/20 into training and testing.
         Each of the individual testing datapoint can be inspected by index.
         **To Read the table** The table describes how an individual datapoint is classified.
         Contribution refers to the extent & direction of influence a feature has on the outcome
@@ -182,7 +181,7 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
         st.info(
             """
         This chart illustrates how each feature collectively influence the prediction outcome.
-        Features in the red make it more likely to be the predicted class, and the features in blue pushing back leftward reduce the likelihood. [Read more about forceplot](https://github.com/slundberg/shap)  
+        Features in the red make it more likely to be the predicted class, and the features in blue pushing back leftward reduce the likelihood. [Read more about forceplot](https://github.com/slundberg/shap)
         Please note that the explanation here is always based on the predicted class rather than the positive class (i.e. if predicted class is 0, to the right means more likely to be 0) to cater for multi-class senaiors.
         """
         )
@@ -191,24 +190,19 @@ def show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
 
     pred_i = int(pred[slider_idx])
 
-    # Determine if it's a multi-class or binary classification for SHAP values
     if isinstance(shap_values, list) and len(target_labels) > 2: # Multi-class
         expected_value_for_plot = explainer.expected_value[pred_i]
         shap_values_for_plot = shap_values[pred_i][slider_idx, :]
     else: # Binary classification or single output model
-        # For binary, expected_value might be a single float or array of two floats.
-        # If it's an array, we typically care about the positive class's expected value or the first one.
         expected_value_for_plot = explainer.expected_value[0] if isinstance(explainer.expected_value, (list, np.ndarray)) else explainer.expected_value
         shap_values_for_plot = shap_values[slider_idx, :]
 
-    # Use st.write to render the SHAP force plot directly.
-    # The `matplotlib=True` argument is explicitly removed as it causes NotImplementedError on some deployments.
+    # Crucial change: Convert the Pandas Series to a NumPy array for features argument
     st.write(
         shap.force_plot(
             expected_value_for_plot,
             shap_values_for_plot,
-            X_test.iloc[slider_idx, :],
-            # matplotlib=True, # REMOVED THIS LINE
+            X_test.iloc[slider_idx, :].values, # Use .values here
         )
     )
 
@@ -218,18 +212,18 @@ def show_local_interpretation(
 ):
     """show the interpretation based on the selected framework"""
     n_data = X_test.shape[0]
-    slider_idx = st.slider("Which datapoint to explain", 0, n_data - 1) [cite: 46]
+    slider_idx = st.slider("Which datapoint to explain", 0, n_data - 1)
 
     st.text(
         "Prediction: "
         + str(target_labels[int(pred[slider_idx])])
         + " | Actual label: "
         + str(target_labels[int(y_test[slider_idx])])
-    ) [cite: 47]
+    )
 
-    if dim_framework == "SHAP": [cite: 10]
+    if dim_framework == "SHAP":
         show_local_interpretation_shap(clf, X_test, pred, target_labels, slider_idx)
-    elif dim_framework == "ELI5": [cite: 11]
+    elif dim_framework == "ELI5":
         show_local_interpretation_eli5(
             X_test, clf, pred, target_labels, features, dim_model, slider_idx
         )
@@ -238,10 +232,10 @@ def show_local_interpretation(
 def show_perf_metrics(y_test, pred):
     """show model performance metrics such as classification report or confusion matrix"""
     report = classification_report(y_test, pred, output_dict=True)
-    st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose()) [cite: 14, 15]
+    st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
     conf_matrix = confusion_matrix(y_test, pred, labels=list(set(y_test)))
     sns.set(font_scale=1.4)
-    fig, ax = plt.subplots() # Create a figure explicitly for seaborn heatmap
+    fig, ax = plt.subplots()
     sns.heatmap(
         conf_matrix,
         square=True,
@@ -249,9 +243,9 @@ def show_perf_metrics(y_test, pred):
         annot_kws={"size": 15},
         cmap="YlGnBu",
         cbar=False,
-        ax=ax # Pass the axes object to heatmap
+        ax=ax
     )
-    st.sidebar.pyplot(fig) # Pass the figure to st.sidebar.pyplot
+    st.sidebar.pyplot(fig)
 
 
 def draw_pdp(clf, dataset, features, target_labels, dim_model):
@@ -273,15 +267,12 @@ def draw_pdp(clf, dataset, features, target_labels, dim_model):
         else:
             ncol = 5
         
-        # Create a figure and axes explicitly for pdp_plot
-        fig, axes = plt.subplots(ncols=ncol, figsize=(12, 5)) 
-        # pdp_plot often takes `plot_ax` or relies on `plt.gca()`. For consistency, explicit axes are better.
-        # However, pdpbox's pdp_plot doesn't directly take an 'ax' argument in the same way.
-        # It typically draws on the current active figure/axes.
-        # To avoid global state issues and deprecation warnings, we ensure a figure is active.
-        # The library then draws on plt.gca() (the current axes of `fig`).
-        pdp.pdp_plot(pdp_dist, selected_col, plot_pts_vert=False, show_titles=True) # pdp.pdp_plot draws on the current active axes
-        st.pyplot(fig) # Pass the figure to st.pyplot
+        fig, axes = plt.subplots(ncols=ncol, figsize=(12, 5))
+        # pdp.pdp_plot draws on the current active axes.
+        # Ensure that 'fig' is the current figure before calling pdp_plot if 'plot_ax' is not directly supported.
+        plt.figure(fig.number)
+        pdp.pdp_plot(pdp_dist, selected_col, plot_pts_vert=False, show_titles=True)
+        st.pyplot(fig)
 
 
 def main():
@@ -290,8 +281,8 @@ def main():
     ################################################
     dim_data = st.sidebar.selectbox(
         "Try out sample data", ("iris", "titanic", "census income")
-    ) [cite: 1]
-    uploaded_file = st.sidebar.file_uploader("Or upload a CSV file", type="csv") [cite: 3, 4, 5, 6]
+    )
+    uploaded_file = st.sidebar.file_uploader("Or upload a CSV file", type="csv")
 
     df, X, y, features, target_labels = upload_data(uploaded_file, dim_data)
 
@@ -306,7 +297,7 @@ def main():
     ################################################
     dim_model = st.sidebar.selectbox(
         "Choose a model", ("XGBoost", "lightGBM", "randomforest")
-    ) [cite: 7]
+    )
     if dim_model == "randomforest":
         clf = RandomForestClassifier(n_estimators=500, random_state=0, n_jobs=-1)
         clf.fit(X_train, y_train)
@@ -335,24 +326,23 @@ def main():
 
     dim_framework = st.sidebar.radio(
         "Choose interpretation framework", ["SHAP", "ELI5"]
-    ) [cite: 9]
+    )
 
     ################################################
     # Model output
     ################################################
-    if st.sidebar.checkbox("Preview uploaded data"): [cite: 12]
+    if st.sidebar.checkbox("Preview uploaded data"):
         st.sidebar.dataframe(df.head())
 
-    # the report is formatted to 2 decimal points (i.e. accuracy 1 means 1.00) dependent on streamlit styling update https://github.com/streamlit/streamlit/issues/1125
-    st.sidebar.markdown("#### Classification report") [cite: 13]
+    st.sidebar.markdown("#### Classification report")
     show_perf_metrics(y_test, pred)
 
     ################################################
     # Global Interpretation
     ################################################
-    st.markdown("#### Global Interpretation") [cite: 26]
-    st.text("Most important features") [cite: 27]
-    info_global = st.button("How it is calculated") [cite: 28]
+    st.markdown("#### Global Interpretation")
+    st.text("Most important features")
+    info_global = st.button("How it is calculated")
     if info_global:
         st.info(
             """
@@ -360,8 +350,6 @@ def main():
         by randomly shuffle a feature, how much does the model performance decrease.
         """
         )
-    # This only works if removing newline from html
-    # Refactor this once added more models
     if dim_framework == "SHAP":
         show_global_interpretation_shap(X_train, clf)
     elif dim_framework == "ELI5":
@@ -371,8 +359,8 @@ def main():
         st.sidebar.markdown(
             """
             Read more about how it works on [Github] (https://github.com/yanhann10/ml_interpret)
-            Basic data cleaning recommended before upload   
-            [Feedback](https://docs.google.com/forms/d/e/1FAIpQLSdTXKpMPC0-TmWf2ngU9A0sokH5Z0m-QazSPBIZyZ2AbXIBug/viewform?usp=sf_link)   
+            Basic data cleaning recommended before upload
+            [Feedback](https://docs.google.com/forms/d/e/1FAIpQLSdTXKpMPC0-TmWf2ngU9A0sokH5Z0m-QazSPBIZyZ2AbXIBug/viewform?usp=sf_link)
             Last update Mar 2020 by [@hannahyan](https://twitter.com/hannahyan)
             """
         )
@@ -384,10 +372,9 @@ def main():
     ################################################
     # Local Interpretation
     ################################################
-    st.markdown("#### Local Interpretation") [cite: 42]
+    st.markdown("#### Local Interpretation")
 
-    # misclassified
-    if st.checkbox("Filter for misclassified"): [cite: 45]
+    if st.checkbox("Filter for misclassified"):
         X_test, y_test, pred = filter_misclassified(X_test, y_test, pred)
         if X_test.shape[0] == 0:
             st.text("No misclassification🎉")
