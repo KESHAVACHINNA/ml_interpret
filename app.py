@@ -106,20 +106,26 @@ def show_global_interpretation_eli5(X_train, y_train, features, clf, dim_model):
     st.write(bar)
 
 
-def show_global_interpretation_shap(X_train, clf):
-    explainer = shap.TreeExplainer(clf)
-    shap_values = explainer.shap_values(X_train)
-    shap.summary_plot(
-        shap_values,
-        X_train,
-        plot_type="bar",
-        max_display=5,
-        plot_size=(12, 5),
-        color=plt.get_cmap("tab20b"),
-        show=False,
-        color_bar=False,
-    )
-    st.pyplot()
+import streamlit as st
+from sklearn.metrics import classification_report, confusion_matrix
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+def show_perf_metrics(y_true, y_pred):
+    st.subheader("Performance Metrics")
+
+    # Classification Report
+    report = classification_report(y_true, y_pred, output_dict=True)
+    st.text("Classification Report:")
+    st.json(report)
+
+    # Confusion Matrix
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(6, 4))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    st.pyplot(plt)
 
 
 def filter_misclassified(X_test, y_test, pred):
@@ -196,21 +202,43 @@ def show_local_interpretation(
         )
 
 
+import streamlit as st
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report, confusion_matrix
+
 def show_perf_metrics(y_test, pred):
-    """show model performance metrics such as classification report or confusion matrix"""
+    """Show model performance metrics such as classification report and confusion matrix"""
+
+    # Classification Report
     report = classification_report(y_test, pred, output_dict=True)
-    st.sidebar.dataframe(pd.DataFrame(report).round(1).transpose())
-    conf_matrix = confusion_matrix(y_test, pred, list(set(y_test)))
-    sns.set(font_scale=1.4)
+    st.sidebar.subheader("Classification Report")
+    st.sidebar.dataframe(pd.DataFrame(report).round(2).transpose())
+
+    # Confusion Matrix
+    labels = sorted(list(set(y_test) | set(pred)))  # ensures all unique classes are included
+    conf_matrix = confusion_matrix(y_test, pred, labels=labels)
+
+    fig, ax = plt.subplots()
+    sns.set(font_scale=1.2)
     sns.heatmap(
         conf_matrix,
-        square=True,
         annot=True,
-        annot_kws={"size": 15},
+        fmt="d",
         cmap="YlGnBu",
         cbar=False,
+        square=True,
+        xticklabels=labels,
+        yticklabels=labels,
+        ax=ax
     )
-    st.sidebar.pyplot()
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("Actual")
+    ax.set_title("Confusion Matrix")
+    
+    st.sidebar.pyplot(fig)
+
 
 
 def draw_pdp(clf, dataset, features, target_labels, dim_model):
@@ -315,6 +343,7 @@ def main():
     if dim_model != "XGBoost" and st.checkbox("Show how features vary with outcome"):
         draw_pdp(clf, X_train, features, target_labels, dim_model)
 
-
-if __name__ == "__main__":
-    main()
+def main():
+    ...
+    show_global_interpretation_shap(X_train, clf)  # ← This line throws error
+    ...
